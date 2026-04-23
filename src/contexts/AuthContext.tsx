@@ -6,7 +6,7 @@ import { User, BUREAU_MEMBERS, ADMIN_EMAIL, ADMIN_PASSWORD } from '../types';
 interface AuthContextType {
   currentUser: User | null;
   isLoading: boolean;
-  register: (data: Partial<User> & { password: string }) => Promise<void>;
+  register: (data: Partial<User> & { password: string; _forcedRole?: string }) => Promise<void>;
   login: (email: string, password: string) => Promise<User>;
   logout: () => void;
   verifyPassword: (password: string) => Promise<boolean>;
@@ -22,7 +22,6 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Simple hash function
 const simpleHash = (str: string): string => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -78,8 +77,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { isMember: false };
   };
 
-  const register = async (data: Partial<User> & { password: string }) => {
-    const { password, ...userData } = data;
+  const register = async (data: Partial<User> & { password: string; _forcedRole?: string }) => {
+    const { password, _forcedRole, ...userData } = data as any;
     const hashedPwd = simpleHash(password);
     
     const { isMember, bureauRole } = checkIfBureauMember(
@@ -91,6 +90,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     let role: User['role'] = 'student';
     if (userData.email === ADMIN_EMAIL) role = 'admin';
+    else if (_forcedRole === 'student') role = 'student'; // explicitly forced to student
     else if (isMember) role = 'bureau_member';
 
     const uid = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -103,18 +103,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       phone: userData.phone || '',
       address: userData.address || '',
       role,
-      bureauRole: isMember ? (bureauRole || '') : '',
+      bureauRole: (role === 'bureau_member' && isMember) ? (bureauRole || '') : '',
       level: userData.level || '',
       major: userData.major || '',
       createdAt: new Date().toISOString(),
-      isBureauMember: isMember,
+      isBureauMember: role === 'bureau_member',
       password: hashedPwd,
     };
 
     await setDoc(doc(db, 'users', uid), user);
     
-    const userForStorage = { ...user };
-    localStorage.setItem('amicale_user', JSON.stringify(userForStorage));
+    localStorage.setItem('amicale_user', JSON.stringify(user));
     setCurrentUser(user);
     setIsFirstTime(false);
   };
@@ -122,7 +121,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (email: string, password: string): Promise<User> => {
     const hashedPwd = simpleHash(password);
     
-    // Admin check
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
       const adminUser: User = {
         uid: 'admin_001',
@@ -140,7 +138,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return adminUser;
     }
 
-    // Check Firestore
     const q = query(collection(db, 'users'), where('email', '==', email));
     const snap = await getDocs(q);
     if (snap.empty) throw new Error('Utilisateur non trouvé');
@@ -156,6 +153,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = () => {
     localStorage.removeItem('amicale_user');
+    try { sessionStorage.removeItem('amicale_page'); } catch {}
     setCurrentUser(null);
     setIsFirstTime(true);
   };

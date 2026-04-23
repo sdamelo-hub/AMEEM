@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './components/Toast';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
@@ -22,8 +22,28 @@ type AuthMode = 'register'|'login';
 
 function AppContent() {
   const { currentUser, isLoading } = useAuth();
-  const [authMode, setAuthMode] = useState<AuthMode>('register');
-  const [page, setPage] = useState<Page>('home');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  
+  // Restore last page from sessionStorage for navigation persistence
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      const saved = sessionStorage.getItem('amicale_page') as Page | null;
+      return saved || 'home';
+    } catch { return 'home'; }
+  });
+
+  const navigate = (p: string) => {
+    const newPage = p as Page;
+    setPage(newPage);
+    try { sessionStorage.setItem('amicale_page', newPage); } catch {}
+  };
+
+  useEffect(() => {
+    if (!currentUser) {
+      try { sessionStorage.removeItem('amicale_page'); } catch {}
+      setPage('home');
+    }
+  }, [currentUser]);
 
   if (isLoading) {
     return (
@@ -38,38 +58,43 @@ function AppContent() {
   }
 
   if (!currentUser) {
-    if (authMode === 'register') return <RegisterPage onSuccess={()=>setPage('home')} onLoginClick={()=>setAuthMode('login')}/>;
-    return <LoginPage onSuccess={()=>setPage('home')} onRegisterClick={()=>setAuthMode('register')} onForgotClick={()=>setAuthMode('register')}/>;
+    if (authMode === 'register') return <RegisterPage onSuccess={()=>navigate('home')} onLoginClick={()=>setAuthMode('login')}/>;
+    return <LoginPage onSuccess={()=>navigate('home')} onRegisterClick={()=>setAuthMode('register')} onForgotClick={()=>setAuthMode('register')}/>;
   }
 
   const isAdmin = currentUser.role==='admin';
   const isBureau = currentUser.role==='bureau_member'||isAdmin;
 
   const navItems = isAdmin
-    ? [{k:'home',l:'Accueil',i:'🏠'},{k:'admin',l:'Admin',i:'🛡'},{k:'treasury',l:'Caisse',i:'💰'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}]
+    ? [{k:'home',l:'Accueil',i:'🏠'},{k:'admin',l:'Admin',i:'🛡️'},{k:'treasury',l:'Caisse',i:'💰'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}]
     : isBureau
     ? [{k:'home',l:'Accueil',i:'🏠'},{k:'announcements',l:'Infos',i:'📢'},{k:'bureau',l:'Bureau',i:'👥'},{k:'messages',l:'Messages',i:'💬'},{k:'profile',l:'Profil',i:'👤'}]
-    : [{k:'home',l:'Accueil',i:'🏠'},{k:'payment',l:'Payer',i:'💳'},{k:'emergency',l:'Urgence',i:'🚨'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}];
+    : [{k:'home',l:'Accueil',i:'🏠'},{k:'payment',l:'Payer',i:'💳'},{k:'bureau',l:'Bureau',i:'👥'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}];
 
-  const titles: Record<string,string> = {home:'AMICALE MBOUROIS',payment:'Paiements',bureau:'Bureau Exécutif',card:'Ma Carte',emergency:'Urgences',treasury:'Caisse',admin:'Administration',announcements:'Informations',messages:'Messages',profile:'Mon Profil'};
+  const titles: Record<string,string> = {home:'AMICALE MBOUROIS',payment:'Paiements',bureau:'Bureau Exécutif',card:'Ma Carte',emergency:'Urgences',treasury:'Caisse',admin:'Administration','admin-members':'Administration','admin-payments':'Administration',announcements:'Informations',messages:'Messages',profile:'Mon Profil',reports:'Rapports','emergency-list':'Urgences'};
+
+  const isNavActive = (k: string) => {
+    if (k === 'admin') return ['admin','admin-members','admin-payments','reports'].includes(page);
+    return page === k || page.startsWith(k + '-');
+  };
 
   const renderPage = () => {
     switch(page){
-      case 'home': return <HomePage onNavigate={p=>setPage(p as Page)}/>;
-      case 'payment': return <PaymentPage onNavigate={p=>setPage(p as Page)}/>;
+      case 'home': return <HomePage onNavigate={navigate}/>;
+      case 'payment': return <PaymentPage onNavigate={navigate}/>;
       case 'bureau': return <BureauPage/>;
-      case 'card': return <CardPage onNavigate={p=>setPage(p as Page)}/>;
+      case 'card': return <CardPage onNavigate={navigate}/>;
       case 'emergency': return <EmergencyPage/>;
       case 'emergency-list': return <EmergencyPage/>;
       case 'treasury': return <TreasuryPage/>;
-      case 'admin': return <AdminPage onNavigate={p=>setPage(p as Page)}/>;
-      case 'admin-members': return <AdminPage onNavigate={p=>setPage(p as Page)}/>;
-      case 'admin-payments': return <AdminPage onNavigate={p=>setPage(p as Page)}/>;
+      case 'admin': return <AdminPage onNavigate={navigate}/>;
+      case 'admin-members': return <AdminPage onNavigate={navigate}/>;
+      case 'admin-payments': return <AdminPage onNavigate={navigate}/>;
       case 'announcements': return <AnnouncementsPage/>;
       case 'messages': return <MessagesPage/>;
-      case 'profile': return <ProfilePage/>;
+      case 'profile': return <ProfilePage onNavigate={navigate}/>;
       case 'reports': return <ReportsPage/>;
-      default: return <HomePage onNavigate={p=>setPage(p as Page)}/>;
+      default: return <HomePage onNavigate={navigate}/>;
     }
   };
 
@@ -85,14 +110,14 @@ function AppContent() {
             <div className="header-subtitle">Amicale des Étudiants de Mbour</div>
           </div>
         </div>
-        <button onClick={()=>setPage('profile')} style={{background:'rgba(255,255,255,0.2)',border:'none',borderRadius:'50%',width:36,height:36,cursor:'pointer',fontSize:18}}>👤</button>
+        <button onClick={()=>navigate('profile')} style={{background:'rgba(255,255,255,0.2)',border:'none',borderRadius:'50%',width:36,height:36,cursor:'pointer',fontSize:18}}>👤</button>
       </div>
 
       <div style={{flex:1,overflowY:'auto'}}>{renderPage()}</div>
 
       <nav className="bottom-nav">
         {navItems.map(item=>(
-          <button key={item.k} className={`nav-item ${page===item.k||page.startsWith(item.k+'-')?'active':''}`} onClick={()=>setPage(item.k as Page)}>
+          <button key={item.k} className={`nav-item ${isNavActive(item.k)?'active':''}`} onClick={()=>navigate(item.k)}>
             <span style={{fontSize:22}}>{item.i}</span>
             <span className="nav-label">{item.l}</span>
           </button>

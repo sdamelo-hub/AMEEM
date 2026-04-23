@@ -4,6 +4,15 @@ import { db } from '../services/firebase';
 import { collection, addDoc, getDocs, query, where, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { Emergency } from '../types';
 
+const formatDate = (ts: string): string => {
+  if (!ts) return '';
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+};
+
 export default function EmergencyPage() {
   const { currentUser } = useAuth();
   const [message, setMessage] = useState('');
@@ -48,97 +57,115 @@ export default function EmergencyPage() {
       setSent(true);
       setMessage('');
       loadEmergencies();
-    } catch (e: any) { alert('Erreur: ' + e.message); }
+    } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
   const handleResolve = async (id: string) => {
     try {
       await updateDoc(doc(db, 'emergencies', id), { status: 'resolved' });
-      loadEmergencies();
+      setAllEmergencies(prev => prev.map(e => e.id === id ? { ...e, status: 'resolved' } : e));
     } catch (e: any) { alert('Erreur: ' + e.message); }
   };
 
+  // ADMIN/BUREAU VIEW - list of all emergencies
+  if (isAdmin || isBureau) {
+    const active = allEmergencies.filter(e => e.status === 'active');
+    const resolved = allEmergencies.filter(e => e.status === 'resolved');
+    
+    return (
+      <div className="page fade-in">
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🚨 Urgences</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Signalements des membres</div>
+
+        {loadingList ? (
+          <div style={{ textAlign: 'center', paddingTop: 40 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+        ) : allEmergencies.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '50px 20px', color: '#6b7280' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Aucune urgence signalée</div>
+          </div>
+        ) : (
+          <>
+            {active.length > 0 && (
+              <>
+                <div className="section-title" style={{ color: '#dc2626' }}>🔴 Actives ({active.length})</div>
+                {active.map(e => (
+                  <div key={e.id} className="card" style={{ borderLeft: '4px solid #dc2626', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{e.userName}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>{formatDate(e.timestamp)}</div>
+                        <div style={{ fontSize: 13, color: '#374151' }}>{e.message}</div>
+                      </div>
+                      <button
+                        onClick={() => handleResolve(e.id!)}
+                        style={{ background: '#059669', color: 'white', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', marginLeft: 10 }}
+                      >
+                        ✅ Résolu
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            {resolved.length > 0 && (
+              <>
+                <div className="section-title" style={{ color: '#059669', marginTop: 16 }}>✅ Résolues ({resolved.length})</div>
+                {resolved.map(e => (
+                  <div key={e.id} className="card" style={{ borderLeft: '4px solid #059669', marginBottom: 10, opacity: 0.75 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{e.userName}</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>{formatDate(e.timestamp)}</div>
+                    <div style={{ fontSize: 13, color: '#374151' }}>{e.message}</div>
+                    <span className="badge badge-success" style={{ marginTop: 6 }}>✅ Résolu</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // STUDENT VIEW - send emergency
   return (
     <div className="page fade-in">
-      <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🚨 Urgences</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
-        {isBureau ? 'Gérer les signalements d\'urgence' : 'Signalez une situation d\'urgence'}
-      </div>
+      <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🚨 Signaler une urgence</div>
+      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Le bureau sera notifié de votre situation</div>
 
-      {/* Send form (for students) */}
-      {!isBureau && (
-        <div className="card" style={{ marginBottom: 20, border: '2px solid #fee2e2' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: '#dc2626' }}>🆘 Signaler une urgence</div>
-          {sent && (
-            <div className="alert alert-success" style={{ marginBottom: 12 }}>
-              <span>✅</span> Votre signalement a été envoyé. Le bureau a été notifié.
-            </div>
-          )}
-          <div className="input-group">
-            <label className="input-label">Décrivez votre situation</label>
-            <textarea
-              className="input"
-              style={{ minHeight: 100, resize: 'none' }}
-              placeholder="Décrivez clairement votre situation d'urgence..."
-              value={message}
-              onChange={e => { setMessage(e.target.value); setSent(false); }}
-            />
-          </div>
-          <div className="alert alert-warning" style={{ marginBottom: 12 }}>
-            <span>⚠️</span> N'utilisez ce formulaire que pour de vraies urgences. Le bureau sera immédiatement alerté.
-          </div>
-          <button className="btn btn-danger" onClick={handleSend} disabled={loading || !message.trim()}>
-            {loading ? '⏳ Envoi...' : '🚨 Envoyer le signalement'}
-          </button>
+      {sent && (
+        <div className="alert alert-success" style={{ marginBottom: 16 }}>
+          <span>✅</span> Votre signalement a été envoyé. Le bureau vous contactera bientôt.
         </div>
       )}
 
-      {/* List for admin/bureau */}
-      {isBureau && (
-        <>
-          <div className="section-title">Signalements reçus</div>
-          {loadingList ? (
-            <div style={{ textAlign: 'center', padding: 30 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
-          ) : allEmergencies.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', color: '#6b7280', padding: 30 }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
-              <div>Aucune urgence signalée</div>
-            </div>
-          ) : (
-            allEmergencies.map(e => (
-              <div key={e.id} className="card" style={{ borderLeft: `4px solid ${e.status === 'active' ? '#dc2626' : '#059669'}`, marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{e.userName}</div>
-                    <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(e.timestamp).toLocaleString('fr-FR')}</div>
-                  </div>
-                  <span className={`badge ${e.status === 'active' ? 'badge-danger' : 'badge-success'}`}>
-                    {e.status === 'active' ? '🔴 Actif' : '✅ Résolu'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 10 }}>{e.message}</div>
-                {e.status === 'active' && isAdmin && (
-                  <button className="btn btn-secondary btn-sm" onClick={() => handleResolve(e.id!)}>
-                    ✅ Marquer comme résolu
-                  </button>
-                )}
-              </div>
-            ))
-          )}
-        </>
-      )}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="input-group">
+          <label className="input-label">Décrivez votre situation</label>
+          <textarea
+            className="input"
+            style={{ minHeight: 120, resize: 'none' }}
+            placeholder="Expliquez brièvement votre urgence..."
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+          />
+        </div>
+        <button className="btn btn-danger" onClick={handleSend} disabled={loading || !message.trim()}>
+          {loading ? '⏳ Envoi...' : '🚨 Envoyer le signalement'}
+        </button>
+      </div>
 
-      {/* My emergencies (for students) */}
-      {!isBureau && myEmergencies.length > 0 && (
+      {/* Show user's own past emergencies */}
+      {myEmergencies.length > 0 && (
         <>
           <div className="section-title">Mes signalements</div>
           {myEmergencies.map(e => (
-            <div key={e.id} className="card" style={{ borderLeft: `4px solid ${e.status === 'active' ? '#dc2626' : '#059669'}` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(e.timestamp).toLocaleString('fr-FR')}</div>
+            <div key={e.id} className="card" style={{ borderLeft: `4px solid ${e.status === 'active' ? '#dc2626' : '#059669'}`, marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: '#6b7280' }}>{formatDate(e.timestamp)}</div>
                 <span className={`badge ${e.status === 'active' ? 'badge-danger' : 'badge-success'}`}>
-                  {e.status === 'active' ? 'En cours' : 'Résolu'}
+                  {e.status === 'active' ? '🔴 Actif' : '✅ Résolu'}
                 </span>
               </div>
               <div style={{ fontSize: 13 }}>{e.message}</div>

@@ -55,7 +55,7 @@ export default function LoginPage({ onSuccess, onRegisterClick, onForgotClick }:
           <div style={{ position: 'relative' }}>
             <input className="input" type={showPassword ? 'text' : 'password'} placeholder="Votre mot de passe" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()} style={{ paddingRight: 48 }} />
             <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7280' }}>
-              {showPassword ? '🙈' : '👁️'}
+              {showPassword ? '' : '👁️'}
             </button>
           </div>
         </div>

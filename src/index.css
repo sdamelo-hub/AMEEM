@@ -79,8 +79,9 @@ select.input { appearance: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .fade-in { animation: fadeIn 0.3s ease-out; }
 .slide-up { animation: slideUp 0.4s ease-out; }
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-end; justify-content: center; backdrop-filter: blur(2px); }
-.modal-content { background: white; border-radius: 20px 20px 0 0; padding: 20px; width: 100%; max-width: 480px; max-height: 85vh; overflow-y: auto; animation: slideUp 0.3s ease-out; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-end; justify-content: center; backdrop-filter: blur(2px); touch-action: none; overscroll-behavior: contain; }
+.modal-content { background: white; border-radius: 20px 20px 0 0; padding: 20px; width: 100%; max-width: 480px; max-height: 85vh; overflow-y: auto; animation: slideUp 0.3s ease-out; overscroll-behavior: contain; touch-action: pan-y; }
+body.modal-open { overflow: hidden; position: fixed; width: 100%; }
 .modal-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
 .alert { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 14px; display: flex; align-items: flex-start; gap: 10px; }
 .alert-danger { background: var(--danger-light); color: var(--danger); }
@@ -112,3 +113,8 @@ select.input { appearance: none; }
 .justify-between { justify-content: space-between; }
 .w-full { width: 100%; }
 .pwa-modal { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 480px; background: white; border-radius: 20px 20px 0 0; padding: 24px 20px; z-index: 300; box-shadow: 0 -8px 30px rgba(0,0,0,0.15); animation: slideUp 0.4s ease-out; }
+
+/* Prevent background scroll when overlay/sheet is open */
+.app-layout { overflow: hidden; }
+.payment-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 150; display: flex; align-items: flex-end; justify-content: center; touch-action: none; }
+.payment-sheet { background: white; border-radius: 20px 20px 0 0; padding: 24px 20px 36px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; animation: slideUp 0.3s ease-out; overscroll-behavior: contain; touch-action: pan-y; }

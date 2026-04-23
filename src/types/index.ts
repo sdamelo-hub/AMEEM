@@ -97,7 +97,7 @@ export const BUREAU_MEMBERS = [
 ];
 
 export const WAVE_LINK = "https://pay.wave.com/m/M_sn_bA-FWwigYgSz/c/sn/?amount=8080";
-export const MENSUALITE_AMOUNT = 1000;
+export const MENSUALITE_AMOUNT = 8000;
 export const CARTE_AMOUNT = 1000;
 export const ADMIN_EMAIL = "admin@amicale-mbour.sn";
 export const ADMIN_PASSWORD = "Admin@2024!";

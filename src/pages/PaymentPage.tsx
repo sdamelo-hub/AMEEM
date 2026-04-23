@@ -19,6 +19,7 @@ export default function PaymentPage({ onNavigate }: Props) {
   const [histLoaded, setHistLoaded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showVerifyPwd, setShowVerifyPwd] = useState(false);
+  const [waveOpened, setWaveOpened] = useState(false); // Track if Wave was actually opened
 
   const amount = payType === 'mensualite' ? MENSUALITE_AMOUNT : CARTE_AMOUNT;
   const currentMonthLabel = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -35,12 +36,14 @@ export default function PaymentPage({ onNavigate }: Props) {
     try {
       const ok = await verifyPassword(password);
       if (!ok) { setError('Mot de passe incorrect'); setLoading(false); return; }
+      setWaveOpened(false); // reset when entering wave step
       setStep('wave');
     } catch { setError('Erreur de vérification'); }
     finally { setLoading(false); }
   };
 
   const handleWaveClick = () => {
+    setWaveOpened(true); // Mark that user opened Wave
     const a = document.createElement('a');
     a.href = WAVE_LINK;
     a.target = '_blank';
@@ -49,6 +52,12 @@ export default function PaymentPage({ onNavigate }: Props) {
   };
 
   const handleConfirm = async () => {
+    // Must have opened Wave first
+    if (!waveOpened) {
+      setError('Veuillez d\'abord cliquer sur "Payer via Wave" pour effectuer le paiement, puis revenir confirmer.');
+      return;
+    }
+    
     setLoading(true); setError('');
     try {
       const payment: Omit<Payment, 'id'> = {
@@ -94,7 +103,7 @@ export default function PaymentPage({ onNavigate }: Props) {
     finally { setLoading(false); }
   };
 
-  const resetToChoose = () => { setStep('choose'); setPassword(''); setError(''); };
+  const resetToChoose = () => { setStep('choose'); setPassword(''); setError(''); setWaveOpened(false); };
 
   return (
     <div className="page fade-in">
@@ -104,7 +113,7 @@ export default function PaymentPage({ onNavigate }: Props) {
       {step === 'choose' && (
         <>
           <div style={{ marginBottom: 20 }}>
-            <div className="section-title">Choisir le type de paiement</div>
+            <div className="section-title"> Payer par  wave</div>
             
             <div className="card" style={{ marginBottom: 12, cursor: 'pointer', border: '2px solid #e5e7eb' }} onClick={() => handleChoose('mensualite')}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -175,11 +184,11 @@ export default function PaymentPage({ onNavigate }: Props) {
             <div style={{ position: 'relative' }}>
               <input className="input" type={showVerifyPwd ? 'text' : 'password'} placeholder="Votre mot de passe" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleVerify()} autoFocus style={{ paddingRight: 48 }} />
               <button type="button" onClick={() => setShowVerifyPwd(!showVerifyPwd)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7280' }}>
-                {showVerifyPwd ? '🙈' : '👁️'}
+                {showVerifyPwd ? ' ' : '👁️'}
               </button>
             </div>
           </div>
-          <button className="btn btn-primary" onClick={handleVerify} disabled={loading}>{loading ? '⏳' : '✅ Confirmer'}</button>
+          <button className="btn btn-primary" onClick={handleVerify} disabled={loading}>{loading ? '⏳ Vérification...' : '✅ Confirmer'}</button>
           <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={resetToChoose}>← Retour</button>
         </div>
       )}
@@ -188,7 +197,9 @@ export default function PaymentPage({ onNavigate }: Props) {
         <div className="slide-up">
           <div className="alert alert-info" style={{ marginBottom: 16 }}>
             <span>📌</span>
-            <div>Cliquez sur le bouton Wave ci-dessous pour effectuer votre paiement de <strong>{amount.toLocaleString()} FCFA</strong>, puis revenez confirmer.</div>
+            <div>
+              <strong>Étape 1 :</strong> "Payer via Wave" ci-dessous pour effectuer le paiement de <strong>{amount.toLocaleString()} FCFA</strong>.
+            </div>
           </div>
 
           <button className="wave-btn" onClick={handleWaveClick} style={{ marginBottom: 16 }}>
@@ -198,17 +209,30 @@ export default function PaymentPage({ onNavigate }: Props) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>Payer via Wave</div>
               <div style={{ fontSize: 12, opacity: 0.9, marginTop: 2 }}>Montant: {amount.toLocaleString()} FCFA</div>
-              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 1 }}>Cliquez pour ouvrir Wave →</div>
+              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 1 }}>Appuyez pour ouvrir Wave →</div>
             </div>
           </button>
 
-          <div className="alert alert-warning">
-            <span>⚠️</span> Après avoir payé sur Wave, revenez ici et appuyez sur "J'ai payé" pour confirmer.
-          </div>
+          {waveOpened ? (
+            <div className="alert alert-success" style={{ marginBottom: 12 }}>
+              <span>✅</span> Wave ouvert. Apres paiement, appuyez sur "Confirmer le paiement".
+            </div>
+          ) : (
+            <div className="alert alert-warning" style={{ marginBottom: 12 }}>
+              <span>⚠️</span> Vous devez d'abord payer sur Wave avant de confirmer.
+            </div>
+          )}
 
           {error && <div className="alert alert-danger">{error}</div>}
 
-          <button className="btn btn-secondary" onClick={handleConfirm} disabled={loading}>{loading ? '⏳ Enregistrement...' : '✅ J\'ai payé — Confirmer'}</button>
+          <button
+            className="btn btn-secondary"
+            onClick={handleConfirm}
+            disabled={loading || !waveOpened}
+            style={{ opacity: waveOpened ? 1 : 0.5 }}
+          >
+            {loading ? '⏳ Enregistrement...' : '✅ Confirmer le paiement'}
+          </button>
           <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={() => setStep('choose')}>← Annuler</button>
         </div>
       )}
