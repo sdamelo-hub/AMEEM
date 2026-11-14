@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../services/firebase';
-import { collection, addDoc, getDocs, query, orderBy, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, doc, getDoc, setDoc } from 'firebase/firestore';
 import { Withdrawal, Treasury, Payment } from '../types';
 import * as XLSX from 'xlsx';
+
+const NAVY = '#0F2557';
+const MUTED = '#55627F';
 
 export default function TreasuryPage() {
   const { currentUser, verifyPassword } = useAuth();
@@ -25,28 +28,41 @@ export default function TreasuryPage() {
     try {
       const td = await getDoc(doc(db, 'treasury', 'main'));
       if (td.exists()) setTreasury(td.data() as Treasury);
-      
+
       const wq = query(collection(db, 'withdrawals'), orderBy('timestamp', 'desc'));
       const ws = await getDocs(wq);
       setWithdrawals(ws.docs.map(d => ({ id: d.id, ...d.data() } as Withdrawal)));
 
+      // Seuls les paiements confirmés comptent dans les entrées
       const pq = query(collection(db, 'payments'), orderBy('timestamp', 'desc'));
       const ps = await getDocs(pq);
-      setPayments(ps.docs.map(d => ({ id: d.id, ...d.data() } as Payment)));
+      setPayments(
+        ps.docs
+          .map(d => ({ id: d.id, ...d.data() } as Payment))
+          .filter(p => p.status === 'completed')
+      );
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
+  const amt = Math.round(parseFloat(amount) || 0);
+
+  const closeForm = () => {
+    setShowWithdrawForm(false);
+    setError('');
+    setAmount(''); setReason(''); setPassword('');
+  };
+
   const handleWithdraw = async () => {
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) { setError('Montant invalide'); return; }
-    if (!reason.trim()) { setError('Veuillez indiquer le motif'); return; }
-    if (amt > treasury.balance) { setError(`Solde insuffisant (${treasury.balance.toLocaleString()} FCFA disponibles)`); return; }
+    if (!amt || amt <= 0) { setError('Entrez un montant valide.'); return; }
+    if (!reason.trim()) { setError('Indiquez le motif du retrait.'); return; }
+    if (amt > treasury.balance) { setError(`Solde insuffisant : ${treasury.balance.toLocaleString()} FCFA disponibles.`); return; }
+    if (!password) { setError('Entrez votre mot de passe pour confirmer.'); return; }
 
     setSubmitting(true); setError('');
     try {
       const ok = await verifyPassword(password);
-      if (!ok) { setError('Mot de passe incorrect'); setSubmitting(false); return; }
+      if (!ok) { setError('Mot de passe incorrect.'); setSubmitting(false); return; }
 
       const newBalance = treasury.balance - amt;
       const withdrawal: Omit<Withdrawal, 'id'> = {
@@ -59,87 +75,131 @@ export default function TreasuryPage() {
       };
 
       await addDoc(collection(db, 'withdrawals'), withdrawal);
-      
-      const treasuryRef = doc(db, 'treasury', 'main');
-      await setDoc(treasuryRef, { balance: newBalance, lastUpdated: new Date().toISOString() });
+      await setDoc(doc(db, 'treasury', 'main'), { balance: newBalance, lastUpdated: new Date().toISOString() });
 
       setTreasury({ balance: newBalance, lastUpdated: new Date().toISOString() });
-      setSuccess(`Retrait de ${amt.toLocaleString()} FCFA enregistré avec succès !`);
-      setShowWithdrawForm(false);
-      setAmount(''); setReason(''); setPassword('');
+      setSuccess(`Retrait de ${amt.toLocaleString()} FCFA enregistré. Effectuez maintenant le même retrait sur Wave.`);
+      closeForm();
       loadData();
-    } catch (e: any) { setError('Erreur: ' + e.message); }
+    } catch (e: any) { setError('Erreur : ' + e.message); }
     finally { setSubmitting(false); }
   };
 
+  const sameMonth = (iso: string, ref: Date) => {
+    const d = new Date(iso);
+    return d.getMonth() === ref.getMonth() && d.getFullYear() === ref.getFullYear();
+  };
+
+  const now = new Date();
+  const monthIn = payments.filter(p => sameMonth(p.timestamp, now)).reduce((s, p) => s + p.amount, 0);
+  const monthOut = withdrawals.filter(w => sameMonth(w.timestamp, now)).reduce((s, w) => s + w.amount, 0);
+
+  const typeLabel = (t?: string) =>
+    t === 'mensualite' ? 'Mensualités'
+    : t === 'carte' ? 'Cartes de membre'
+    : t ? t.charAt(0).toUpperCase() + t.slice(1)
+    : 'Autre';
+
   const exportExcel = (period: 'monthly' | 'annual') => {
-    const now = new Date();
+    const ref = new Date();
     let filteredPayments = payments;
     let filteredWithdrawals = withdrawals;
     let title = '';
+    let periodLabel = '';
 
     if (period === 'monthly') {
-      filteredPayments = payments.filter(p => {
-        const d = new Date(p.timestamp);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      });
-      filteredWithdrawals = withdrawals.filter(w => {
-        const d = new Date(w.timestamp);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      });
-      title = `Bilan_${now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).replace(' ', '_')}`;
+      filteredPayments = payments.filter(p => sameMonth(p.timestamp, ref));
+      filteredWithdrawals = withdrawals.filter(w => sameMonth(w.timestamp, ref));
+      periodLabel = ref.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).toUpperCase();
+      title = `Bilan_${ref.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).replace(' ', '_')}`;
     } else {
-      filteredPayments = payments.filter(p => new Date(p.timestamp).getFullYear() === now.getFullYear());
-      filteredWithdrawals = withdrawals.filter(w => new Date(w.timestamp).getFullYear() === now.getFullYear());
-      title = `Bilan_Annuel_${now.getFullYear()}`;
+      filteredPayments = payments.filter(p => new Date(p.timestamp).getFullYear() === ref.getFullYear());
+      filteredWithdrawals = withdrawals.filter(w => new Date(w.timestamp).getFullYear() === ref.getFullYear());
+      periodLabel = String(ref.getFullYear());
+      title = `Bilan_Annuel_${ref.getFullYear()}`;
     }
 
     const totalIn = filteredPayments.reduce((s, p) => s + p.amount, 0);
     const totalOut = filteredWithdrawals.reduce((s, w) => s + w.amount, 0);
 
+    // Entrées regroupées par type de paiement
+    const byType: Record<string, { count: number; total: number }> = {};
+    filteredPayments.forEach(p => {
+      const key = (p.type as string) || 'autre';
+      if (!byType[key]) byType[key] = { count: 0, total: 0 };
+      byType[key].count += 1;
+      byType[key].total += p.amount;
+    });
+    const typeRows = Object.entries(byType).map(([k, v]) => [typeLabel(k), v.count, v.total]);
+
+    // Retraits du plus ancien au plus récent
+    const sortedW = [...filteredWithdrawals].sort(
+      (x, y) => new Date(x.timestamp).getTime() - new Date(y.timestamp).getTime()
+    );
+
     const wb = XLSX.utils.book_new();
 
-    // Summary sheet
-    const summaryData = [
+    // ---- Feuille Résumé (tout l'essentiel sur une page) ----
+    const summaryData: (string | number)[][] = [
       ['AMICALE DES ÉTUDIANTS MBOUROIS (AMEEM)'],
-      [`BILAN ${period === 'monthly' ? 'MENSUEL' : 'ANNUEL'} — ${period === 'monthly' ? now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).toUpperCase() : now.getFullYear()}`],
+      [`BILAN ${period === 'monthly' ? 'MENSUEL' : 'ANNUEL'} — ${periodLabel}`],
       [],
       ['RÉSUMÉ FINANCIER'],
-      ['Total Entrées (FCFA)', totalIn],
-      ['Total Retraits (FCFA)', totalOut],
-      ['Solde Net (FCFA)', totalIn - totalOut],
-      ['Solde Actuel Caisse (FCFA)', treasury.balance],
+      ['Total entrées (FCFA)', totalIn],
+      ['Total retraits (FCFA)', totalOut],
+      ['Solde net de la période (FCFA)', totalIn - totalOut],
+      ['Solde actuel de la caisse (FCFA)', treasury.balance],
       [],
+      ['ENTRÉES PAR TYPE'],
+      ['Type', 'Nombre', 'Total (FCFA)'],
+      ...(typeRows.length ? typeRows : [['Aucune entrée sur la période', 0, 0]]),
+      ['TOTAL', filteredPayments.length, totalIn],
+      [],
+      ['DÉTAIL DES RETRAITS'],
+      ['Date', 'Motif', 'Responsable', 'Montant (FCFA)'],
+      ...(sortedW.length
+        ? sortedW.map(w => [new Date(w.timestamp).toLocaleDateString('fr-FR'), w.reason, w.pcsName, w.amount])
+        : [['Aucun retrait sur la période', '', '', 0]]),
+      ['TOTAL', '', '', totalOut],
     ];
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    summarySheet['!cols'] = [{ wch: 34 }, { wch: 40 }, { wch: 22 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Résumé');
 
-    // Payments sheet
+    // ---- Feuille Paiements ----
     const payData = [
       ['Date', 'Membre', 'Type', 'Montant (FCFA)', 'Statut'],
       ...filteredPayments.map(p => [
         new Date(p.timestamp).toLocaleDateString('fr-FR'),
         p.userName,
-        p.type === 'mensualite' ? 'Mensualité' : 'Carte membre',
+        typeLabel(p.type as string),
         p.amount,
         p.status === 'completed' ? 'Payé' : 'En attente',
-      ])
+      ]),
+      [],
+      ['TOTAL', '', '', totalIn, ''],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(payData), 'Paiements');
+    const paySheet = XLSX.utils.aoa_to_sheet(payData);
+    paySheet['!cols'] = [{ wch: 14 }, { wch: 28 }, { wch: 20 }, { wch: 16 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, paySheet, 'Paiements');
 
-    // Withdrawals sheet
+    // ---- Feuille Retraits ----
     const wData = [
-      ['Date', 'Responsable', 'Motif', 'Montant (FCFA)', 'Solde Avant', 'Solde Après'],
-      ...filteredWithdrawals.map(w => [
+      ['Date', 'Responsable', 'Motif', 'Montant (FCFA)', 'Solde avant', 'Solde après'],
+      ...sortedW.map(w => [
         new Date(w.timestamp).toLocaleDateString('fr-FR'),
         w.pcsName,
         w.reason,
         w.amount,
         w.balanceBefore,
         w.balanceAfter,
-      ])
+      ]),
+      [],
+      ['TOTAL', '', '', totalOut, '', ''],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wData), 'Retraits');
+    const wSheet = XLSX.utils.aoa_to_sheet(wData);
+    wSheet['!cols'] = [{ wch: 14 }, { wch: 24 }, { wch: 40 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wSheet, 'Retraits');
 
     XLSX.writeFile(wb, `${title}.xlsx`);
   };
@@ -148,98 +208,107 @@ export default function TreasuryPage() {
 
   return (
     <div className="page fade-in">
-      <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>💰 Gestion de la Caisse</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Trésorerie AMEEM</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: NAVY, marginBottom: 16 }}>Caisse</div>
 
-      {success && <div className="alert alert-success"><span>✅</span> {success}</div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: 16 }}>{success}</div>}
 
-      {/* Balance card */}
-      <div className="card card-gradient" style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 8 }}>💵 Solde actuel de la caisse</div>
-        <div style={{ fontSize: 32, fontWeight: 900, marginBottom: 8 }}>{treasury.balance.toLocaleString()} FCFA</div>
+      {/* Solde */}
+      <div className="card card-gradient" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, opacity: 0.85 }}>Solde de la caisse</div>
+        <div style={{ fontSize: 34, fontWeight: 800, margin: '6px 0' }}>{treasury.balance.toLocaleString()} FCFA</div>
         <div style={{ fontSize: 11, opacity: 0.7 }}>Mis à jour le {new Date(treasury.lastUpdated).toLocaleString('fr-FR')}</div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <button className="btn btn-sm" style={{ background: 'rgba(255,255,255,0.2)', color: 'white' }} onClick={() => { setShowWithdrawForm(true); setSuccess(''); }}>
-            📤 Effectuer un retrait
-          </button>
-        </div>
+        <button
+          className="btn"
+          style={{ background: '#fff', color: NAVY, fontWeight: 700, marginTop: 16, width: '100%', minHeight: 48 }}
+          onClick={() => { setShowWithdrawForm(true); setSuccess(''); }}
+        >
+          Nouveau retrait
+        </button>
       </div>
 
-      {/* Quick stats */}
-      <div className="grid-2" style={{ marginBottom: 20 }}>
+      {/* Ce mois-ci */}
+      <div className="grid-2" style={{ marginBottom: 16 }}>
         <div className="stat-card">
-          <div className="stat-value" style={{ color: '#059669' }}>
-            {payments.filter(p => {
-              const d = new Date(p.timestamp); const n = new Date();
-              return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
-            }).reduce((s, p) => s + p.amount, 0).toLocaleString()}
-          </div>
+          <div className="stat-value" style={{ color: '#059669' }}>{monthIn.toLocaleString()}</div>
           <div className="stat-label">Entrées ce mois (FCFA)</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value" style={{ color: '#dc2626' }}>
-            {withdrawals.filter(w => {
-              const d = new Date(w.timestamp); const n = new Date();
-              return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
-            }).reduce((s, w) => s + w.amount, 0).toLocaleString()}
-          </div>
+          <div className="stat-value" style={{ color: '#dc2626' }}>{monthOut.toLocaleString()}</div>
           <div className="stat-label">Retraits ce mois (FCFA)</div>
         </div>
       </div>
 
-      {/* Export buttons */}
-      <div style={{ marginBottom: 20 }}>
-        <div className="section-title">📊 Générer un bilan</div>
+      {/* Bilans */}
+      <div style={{ marginBottom: 24 }}>
+        <div className="section-title">Télécharger un bilan (Excel)</div>
         <div className="grid-2">
-          <button className="btn btn-ghost" onClick={() => exportExcel('monthly')}>📅 Bilan Mensuel</button>
-          <button className="btn btn-ghost" onClick={() => exportExcel('annual')}>📆 Bilan Annuel</button>
+          <button className="btn btn-ghost" onClick={() => exportExcel('monthly')}>Ce mois</button>
+          <button className="btn btn-ghost" onClick={() => exportExcel('annual')}>Cette année</button>
         </div>
       </div>
 
-      {/* Withdraw form */}
+      {/* Historique */}
+      <div>
+        <div className="section-title">Retraits récents</div>
+        {withdrawals.length === 0 ? (
+          <div style={{ textAlign: 'center', color: MUTED, fontSize: 14, padding: 20 }}>Aucun retrait enregistré.</div>
+        ) : (
+          <div className="card" style={{ padding: '4px 16px' }}>
+            {withdrawals.map((w, i) => (
+              <div key={w.id} style={{ padding: '14px 0', borderBottom: i < withdrawals.length - 1 ? '1px solid #E5E9F2' : 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: '#b91c1c' }}>-{w.amount.toLocaleString()} FCFA</div>
+                  <div style={{ fontSize: 12, color: MUTED }}>{new Date(w.timestamp).toLocaleDateString('fr-FR')}</div>
+                </div>
+                <div style={{ fontSize: 14, color: '#1f2937', margin: '4px 0' }}>{w.reason}</div>
+                <div style={{ fontSize: 12, color: MUTED }}>
+                  {w.pcsName} · solde après : {w.balanceAfter.toLocaleString()} FCFA
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Formulaire de retrait */}
       {showWithdrawForm && (
-        <div className="modal-overlay" onClick={() => setShowWithdrawForm(false)}>
+        <div className="modal-overlay" onClick={closeForm}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-handle" />
-            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 16 }}>📤 Nouveau retrait</div>
-            {error && <div className="alert alert-danger"><span>⚠️</span> {error}</div>}
+            <div style={{ fontSize: 18, fontWeight: 800, color: NAVY, marginBottom: 16 }}>Nouveau retrait</div>
+
+            {error && <div className="alert alert-danger" style={{ marginBottom: 12 }}>{error}</div>}
+
             <div className="input-group">
-              <label className="input-label">Montant (FCFA) *</label>
-              <input className="input" type="number" placeholder="Ex: 5000" value={amount} onChange={e => setAmount(e.target.value)} />
-              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>Disponible: {treasury.balance.toLocaleString()} FCFA</div>
+              <label className="input-label" htmlFor="wd-amount">Montant (FCFA)</label>
+              <input id="wd-amount" className="input" type="number" inputMode="numeric" placeholder="Ex : 5000" value={amount} onChange={e => setAmount(e.target.value)} />
+              <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>Disponible : {treasury.balance.toLocaleString()} FCFA</div>
             </div>
+
             <div className="input-group">
-              <label className="input-label">Motif du retrait *</label>
-              <textarea className="input" style={{ minHeight: 80, resize: 'none' }} placeholder="Ex: Achat matériel réunion, Organisation événement..." value={reason} onChange={e => setReason(e.target.value)} />
+              <label className="input-label" htmlFor="wd-reason">Motif</label>
+              <input id="wd-reason" className="input" type="text" placeholder="Ex : achat de matériel" value={reason} onChange={e => setReason(e.target.value)} />
             </div>
+
             <div className="input-group">
-              <label className="input-label">Mot de passe de confirmation *</label>
-              <input className="input" type="password" placeholder="Votre mot de passe" value={password} onChange={e => setPassword(e.target.value)} />
+              <label className="input-label" htmlFor="wd-pass">Mot de passe</label>
+              <input id="wd-pass" className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} />
             </div>
-            <button className="btn btn-danger" onClick={handleWithdraw} disabled={submitting}>{submitting ? '⏳' : '✅ Confirmer le retrait'}</button>
-            <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={() => { setShowWithdrawForm(false); setError(''); }}>Annuler</button>
+
+            <button className="btn btn-danger" style={{ minHeight: 48 }} onClick={handleWithdraw} disabled={submitting}>
+              {submitting ? 'Enregistrement...' : 'Confirmer le retrait'}
+            </button>
+            <button
+              className="btn"
+              style={{ background: 'transparent', color: MUTED, marginTop: 6, minHeight: 44 }}
+              onClick={closeForm}
+              disabled={submitting}
+            >
+              Annuler
+            </button>
           </div>
         </div>
       )}
-
-      {/* Withdrawals history */}
-      <div>
-        <div className="section-title">📋 Historique des retraits</div>
-        {withdrawals.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#6b7280', fontSize: 13, padding: 20 }}>Aucun retrait enregistré</div>
-        ) : (
-          withdrawals.map(w => (
-            <div key={w.id} className="card" style={{ borderLeft: '4px solid #dc2626', marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <div style={{ fontWeight: 700, color: '#dc2626', fontSize: 16 }}>-{w.amount.toLocaleString()} FCFA</div>
-                <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(w.timestamp).toLocaleDateString('fr-FR')}</div>
-              </div>
-              <div style={{ fontSize: 13, marginBottom: 6, color: '#374151' }}>📝 {w.reason}</div>
-              <div style={{ fontSize: 11, color: '#6b7280' }}>Par: {w.pcsName} • Solde avant: {w.balanceBefore.toLocaleString()} → après: {w.balanceAfter.toLocaleString()} FCFA</div>
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 }

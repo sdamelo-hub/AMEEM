@@ -1,11 +1,18 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { BUREAU_MEMBERS } from '../types';
+import { Eye, EyeOff, ChevronLeft } from 'lucide-react';
 
 interface Props {
   onSuccess: () => void;
   onLoginClick: () => void;
 }
+
+const TITLES = [
+  { t: 'Créer votre compte', s: 'Vos informations de base' },
+  { t: 'Vos études', s: 'Facultatif, vous pouvez passer cette étape' },
+  { t: 'Sécurité', s: 'Choisissez un mot de passe' },
+];
 
 export default function RegisterPage({ onSuccess, onLoginClick }: Props) {
   const { register } = useAuth();
@@ -14,8 +21,7 @@ export default function RegisterPage({ onSuccess, onLoginClick }: Props) {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [isBureauQuestion, setIsBureauQuestion] = useState<boolean | null>(null);
-  const [bureauVerified, setBureauVerified] = useState<boolean | null>(null);
+  const [isBureau, setIsBureau] = useState(false);
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     address: '', level: '', major: '', password: '', confirmPassword: ''
@@ -39,199 +45,175 @@ export default function RegisterPage({ onSuccess, onLoginClick }: Props) {
     return false;
   };
 
-  const handleStep1 = () => {
-    if (!form.firstName || !form.lastName || !form.phone) {
-      setError('Veuillez remplir les champs obligatoires (Prénom, Nom, Téléphone)'); return;
-    }
-    setError('');
-    // Go to bureau question step
-    setStep(2);
-  };
+  const bureauVerified = isBureau ? checkBureauMembership() : null;
 
-  const handleBureauAnswer = (answer: boolean) => {
-    setIsBureauQuestion(answer);
-    if (answer) {
-      // Verify if they are really in the bureau list
-      const found = checkBureauMembership();
-      setBureauVerified(found);
-      if (!found) {
-        // Not in list - inform them
-        setError('');
-      }
-    }
-    setStep(3);
+  const handleStep1 = () => {
+    if (!form.firstName.trim() || !form.lastName.trim()) { setError('Veuillez saisir votre prénom et votre nom.'); return; }
+    if (form.phone.replace(/\D/g, '').length < 9) { setError('Veuillez saisir un numéro de téléphone valide (9 chiffres minimum).'); return; }
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) { setError('Veuillez saisir une adresse email valide : elle sert à vous connecter.'); return; }
+    setError('');
+    setStep(2);
   };
 
   const handleSubmit = async () => {
     if (!form.password || form.password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères'); return;
+      setError('Le mot de passe doit contenir au moins 6 caractères.'); return;
     }
     if (form.password !== form.confirmPassword) {
-      setError('Les mots de passe ne correspondent pas'); return;
+      setError('Les mots de passe ne correspondent pas.'); return;
     }
     setLoading(true); setError('');
     try {
-      // Force role based on bureau verification
-      const forcedRole = (isBureauQuestion && bureauVerified) ? undefined : 'student';
-      await register({ ...form, _forcedRole: forcedRole } as any);
+      // Rôle bureau uniquement si la case est cochée ET que l'identité figure dans la liste officielle
+      const forcedRole = (isBureau && bureauVerified) ? undefined : 'student';
+      await register({ ...form, email: form.email.trim(), _forcedRole: forcedRole } as any);
       onSuccess();
     } catch (e: any) {
       setError(e.message || 'Erreur lors de l\'inscription');
     } finally { setLoading(false); }
   };
 
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    if (step === 1) handleStep1();
+    else if (step === 2) { setError(''); setStep(3); }
+    else handleSubmit();
+  };
+
+  const goBack = () => { setError(''); setStep(step - 1); };
+
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a56db 0%, #059669 100%)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ textAlign: 'center', padding: '40px 20px 30px', color: 'white' }}>
-        <div style={{ width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', border: '2px solid rgba(255,255,255,0.4)', overflow: 'hidden' }}>
-          <img src="/icons/icon-128.png" alt="AMEEM" style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).src='/icons/logo.jpg'; }} />
-        </div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>AMICALE MBOUROIS</div>
-        <div style={{ fontSize: 12, opacity: 0.8 }}>Amicale des Étudiants de Mbour</div>
+    <div className="login-shell">
+      <div className="login-top compact">
+        <img className="login-logo" src="/icons/icon-128.png" alt="AMEEM"
+          onError={(e) => { (e.target as HTMLImageElement).src = '/icons/logo.jpg'; }} />
+        <div className="login-brand">AMEEM</div>
+        <div className="login-tag">Amicale des Étudiants de Mbour</div>
       </div>
 
-      <div style={{ flex: 1, background: 'white', borderRadius: '24px 24px 0 0', padding: '28px 20px' }}>
-        {/* Progress bar */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-          {[1,2,3].map(s => (
-            <div key={s} style={{ flex:1, height:3, borderRadius:2, background: step >= s ? '#1a56db' : '#e5e7eb' }} />
-          ))}
+      <form className="login-sheet" onSubmit={onSubmit} noValidate>
+        <div className="reg-meta">
+          {step > 1 ? (
+            <button type="button" className="reg-back" onClick={goBack}><ChevronLeft size={20} /> Retour</button>
+          ) : <span />}
+          <span className="reg-count">Étape {step} sur 3</span>
+        </div>
+        <div className="reg-progress" aria-hidden="true">
+          {[1, 2, 3].map(s => <span key={s} className={step >= s ? 'active' : ''} />)}
         </div>
 
-        {error && <div className="alert alert-danger" style={{ marginBottom: 16 }}><span>⚠️</span> {error}</div>}
+        <h1 className="login-title">{TITLES[step - 1].t}</h1>
+        <p className="login-sub">{TITLES[step - 1].s}</p>
 
-        {/* Step 1 - Personal info */}
+        {error && <div className="login-error" role="alert">{error}</div>}
+
         {step === 1 && (
           <div className="fade-in">
-            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>👋 Créer votre compte</h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Entrez vos informations personnelles</p>
-
-            <div className="grid-2">
-              <div className="input-group">
-                <label className="input-label">Prénom *</label>
-                <input className="input" placeholder="Prénom" value={form.firstName} onChange={e => set('firstName', e.target.value)} />
-              </div>
-              <div className="input-group">
-                <label className="input-label">Nom *</label>
-                <input className="input" placeholder="Nom" value={form.lastName} onChange={e => set('lastName', e.target.value)} />
-              </div>
-            </div>
-            <div className="input-group">
-              <label className="input-label">Téléphone *</label>
-              <input className="input" type="tel" placeholder="77 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} />
-            </div>
-            <div className="input-group">
-              <label className="input-label">Email</label>
-              <input className="input" type="email" placeholder="email@exemple.com" value={form.email} onChange={e => set('email', e.target.value)} />
-            </div>
-            <div className="input-group">
-              <label className="input-label">Adresse (Quartier)</label>
-              <input className="input" placeholder="Ex: Mbour Oncad" value={form.address} onChange={e => set('address', e.target.value)} />
-            </div>
-            <div className="grid-2">
-              <div className="input-group">
-                <label className="input-label">Niveau</label>
-                <select className="input" value={form.level} onChange={e => set('level', e.target.value)}>
-                  <option value="">Sélectionner</option>
-                  <option>Licence 1</option><option>Licence 2</option><option>Licence 3</option>
-                  <option>Master 1</option><option>Master 2</option><option>Doctorat</option>
-                </select>
-              </div>
-              <div className="input-group">
-                <label className="input-label">Filière</label>
-                <input className="input" placeholder="Ex: Informatique" value={form.major} onChange={e => set('major', e.target.value)} />
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={handleStep1}>Continuer →</button>
-            <div style={{ textAlign: 'center', marginTop: 20, fontSize: 13, color: '#6b7280' }}>
-              Déjà inscrit ?{' '}
-              <button onClick={onLoginClick} style={{ color: '#1a56db', background: 'none', border: 'none', fontWeight: 600, cursor: 'pointer' }}>
-                Se connecter
-              </button>
-            </div>
+            <Field id="reg-first" label="Prénom">
+              <input id="reg-first" className="login-input" autoComplete="given-name" placeholder="Votre prénom"
+                value={form.firstName} onChange={e => set('firstName', e.target.value)} />
+            </Field>
+            <Field id="reg-last" label="Nom">
+              <input id="reg-last" className="login-input" autoComplete="family-name" placeholder="Votre nom"
+                value={form.lastName} onChange={e => set('lastName', e.target.value)} />
+            </Field>
+            <Field id="reg-phone" label="Téléphone">
+              <input id="reg-phone" className="login-input" type="tel" inputMode="tel" autoComplete="tel" placeholder="77 000 00 00"
+                value={form.phone} onChange={e => set('phone', e.target.value)} />
+            </Field>
+            <Field id="reg-email" label="Email">
+              <input id="reg-email" className="login-input" type="text" inputMode="email" autoComplete="email" autoCapitalize="none" placeholder="exemple@email.com"
+                value={form.email} onChange={e => set('email', e.target.value)} />
+            </Field>
           </div>
         )}
 
-        {/* Step 2 - Bureau question */}
         {step === 2 && (
           <div className="fade-in">
-            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>🏛️ Votre statut</h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>Êtes-vous membre du Bureau Exécutif de l'AMEEM ?</p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
-              <button
-                onClick={() => handleBureauAnswer(true)}
-                style={{ padding: '18px 20px', borderRadius: 12, border: '2px solid #1a56db', background: '#f0f4ff', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left' }}
-              >
-                <span style={{ fontSize: 28 }}>🏛️</span>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a56db' }}>Oui, je suis membre du bureau</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Mon nom figure dans la liste officielle du bureau</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleBureauAnswer(false)}
-                style={{ padding: '18px 20px', borderRadius: 12, border: '2px solid #e5e7eb', background: '#fafafa', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left' }}
-              >
-                <span style={{ fontSize: 28 }}>🎓</span>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: '#374151' }}>Non, je suis étudiant(e) mbourois(e)</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Je veux simplement rejoindre l'amicale</div>
-                </div>
-              </button>
-            </div>
-
-            <button className="btn btn-outline" onClick={() => setStep(1)}>← Retour</button>
+            <Field id="reg-level" label="Niveau" optional>
+              <select id="reg-level" className="login-input" value={form.level} onChange={e => set('level', e.target.value)}>
+                <option value="">Choisir</option>
+                <option>Licence 1</option><option>Licence 2</option><option>Licence 3</option>
+                <option>Master 1</option><option>Master 2</option><option>Doctorat</option>
+              </select>
+            </Field>
+            <Field id="reg-major" label="Filière" optional>
+              <input id="reg-major" className="login-input" placeholder="Ex : Informatique"
+                value={form.major} onChange={e => set('major', e.target.value)} />
+            </Field>
+            <Field id="reg-address" label="Quartier" optional>
+              <input id="reg-address" className="login-input" autoComplete="street-address" placeholder="Ex : Mbour Oncad"
+                value={form.address} onChange={e => set('address', e.target.value)} />
+            </Field>
           </div>
         )}
 
-        {/* Step 3 - Password */}
         {step === 3 && (
           <div className="fade-in">
-            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>🔐 Choisir un mot de passe</h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-              {isBureauQuestion && bureauVerified
-                ? '✅ Identité bureau vérifiée — vous serez enregistré comme membre du bureau'
-                : isBureauQuestion && !bureauVerified
-                ? '⚠️ Votre nom ne figure pas dans la liste du bureau — vous serez enregistré comme étudiant(e)'
-                : '✅ Vous serez enregistré(e) comme étudiant(e) mbourois(e)'}
-            </p>
-
-            {isBureauQuestion && !bureauVerified && (
-              <div className="alert alert-warning" style={{ marginBottom: 16 }}>
-                <span>⚠️</span> Votre identité n'a pas pu être vérifiée dans la liste officielle du bureau. Contactez l'administrateur si c'est une erreur.
-              </div>
+            <label className="reg-check">
+              <input type="checkbox" checked={isBureau} onChange={e => setIsBureau(e.target.checked)} />
+              <span>
+                <span className="reg-check-title">Je fais partie du Bureau Exécutif</span>
+                <span className="reg-check-sub" style={{ display: 'block' }}>Réservé aux membres de la liste officielle</span>
+              </span>
+            </label>
+            {isBureau && (
+              bureauVerified
+                ? <div className="login-hint ok">Identité vérifiée : vous serez enregistré(e) comme membre du bureau.</div>
+                : <div className="login-hint warn">Votre identité ne figure pas dans la liste du bureau : vous serez enregistré(e) comme étudiant(e). Contactez l'administrateur si c'est une erreur.</div>
             )}
 
-            <div className="input-group">
-              <label className="input-label">Mot de passe *</label>
-              <div style={{ position: 'relative' }}>
-                <input className="input" type={showPassword ? 'text' : 'password'} placeholder="Minimum 6 caractères" value={form.password} onChange={e => set('password', e.target.value)} style={{ paddingRight: 48 }} />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7280' }}>
-                  {showPassword ? '' : '👁️'}
+            <Field id="reg-pwd" label="Mot de passe">
+              <div className="login-pwd">
+                <input id="reg-pwd" className="login-input" type={showPassword ? 'text' : 'password'} autoComplete="new-password" placeholder="6 caractères minimum"
+                  value={form.password} onChange={e => set('password', e.target.value)} />
+                <button type="button" className="login-eye" onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
+                  {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
                 </button>
               </div>
-            </div>
-            <div className="input-group">
-              <label className="input-label">Confirmer le mot de passe *</label>
-              <div style={{ position: 'relative' }}>
-                <input className="input" type={showConfirm ? 'text' : 'password'} placeholder="Répétez le mot de passe" value={form.confirmPassword} onChange={e => set('confirmPassword', e.target.value)} style={{ paddingRight: 48 }} />
-                <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7280' }}>
-                  {showConfirm ? '' : '👁️'}
+            </Field>
+            <Field id="reg-confirm" label="Confirmer le mot de passe">
+              <div className="login-pwd">
+                <input id="reg-confirm" className="login-input" type={showConfirm ? 'text' : 'password'} autoComplete="new-password" placeholder="Répétez le mot de passe"
+                  value={form.confirmPassword} onChange={e => set('confirmPassword', e.target.value)} />
+                <button type="button" className="login-eye" onClick={() => setShowConfirm(!showConfirm)}
+                  aria-label={showConfirm ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
+                  {showConfirm ? <EyeOff size={22} /> : <Eye size={22} />}
                 </button>
               </div>
-            </div>
-            <div className="alert alert-info" style={{ marginBottom: 16, fontSize: 13 }}>
-              <span>💡</span> Ce mot de passe est demandé pour confirmer vos paiements.
-            </div>
-            <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-              {loading ? '⏳ Inscription en cours...' : '✅ S\'inscrire'}
-            </button>
-            <button className="btn btn-outline" style={{ marginTop: 10 }} onClick={() => setStep(2)}>← Retour</button>
+            </Field>
           </div>
         )}
-      </div>
+
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column' }}>
+          <button type="submit" className="login-submit" disabled={loading}>
+            {step === 3 ? (loading ? 'Inscription...' : 'Créer mon compte') : 'Continuer'}
+          </button>
+          {step === 2 && (
+            <button type="button" className="reg-skip" onClick={() => { setError(''); setStep(3); }}>Passer cette étape</button>
+          )}
+        </div>
+
+        <div className="login-spacer" />
+
+        {step === 1 && (
+          <div className="login-foot">
+            Déjà inscrit ?{' '}
+            <button type="button" onClick={onLoginClick}>Se connecter</button>
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function Field({ id, label, optional, children }: { id: string; label: string; optional?: boolean; children: ReactNode }) {
+  return (
+    <div className="login-field">
+      <label htmlFor={id}>{label}{optional && <span className="opt"> (facultatif)</span>}</label>
+      {children}
     </div>
   );
 }

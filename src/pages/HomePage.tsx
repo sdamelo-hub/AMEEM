@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../services/firebase';
 import { collection, getDocs, query, where, orderBy, limit, doc, getDoc } from 'firebase/firestore';
-import { Payment, Emergency, Announcement, Treasury } from '../types';
+import { Payment, Emergency, Announcement, Treasury, MENSUALITE_AMOUNT } from '../types';
+import {
+  Megaphone, MessageCircle, IdCard, Siren, BarChart3,
+  Users, Landmark, ChevronRight, CircleCheck,
+} from 'lucide-react';
 
 interface Props {
   onNavigate: (page: string) => void;
@@ -14,9 +18,9 @@ export default function HomePage({ onNavigate }: Props) {
   const [emergencies, setEmergencies] = useState<Emergency[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [treasury, setTreasury] = useState<Treasury | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
-  const isPCS = currentUser?.role === 'pcs' || 
+  const isPCS = currentUser?.role === 'pcs' ||
     currentUser?.bureauRole?.toLowerCase().includes('pcs') ||
     currentUser?.bureauRole?.toLowerCase().includes('trésor');
   const isAdmin = currentUser?.role === 'admin';
@@ -56,10 +60,11 @@ export default function HomePage({ onNavigate }: Props) {
 
   const getInitials = () => {
     if (!currentUser) return 'U';
-    return (currentUser.firstName[0] || '') + (currentUser.lastName[0] || '');
+    return ((currentUser.firstName[0] || '') + (currentUser.lastName[0] || '')).toUpperCase();
   };
 
-  const currentMonth = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  const monthName = new Date().toLocaleDateString('fr-FR', { month: 'long' });
+  const monthLabel = /^[aeiouéèêàâîôû]/i.test(monthName) ? `d'${monthName}` : `de ${monthName}`;
   const paidThisMonth = payments.some(p => {
     const d = new Date(p.timestamp);
     const now = new Date();
@@ -71,128 +76,126 @@ export default function HomePage({ onNavigate }: Props) {
   };
 
   return (
-    <div className="page fade-in">
-      {/* User greeting */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 13, color: '#6b7280' }}>Bonjour 👋</div>
-          <div style={{ fontSize: 18, fontWeight: 800 }}>{currentUser?.firstName} {currentUser?.lastName}</div>
-          {currentUser?.bureauRole && (
-            <div style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>
-              🏛️ {currentUser.bureauRole}
-            </div>
-          )}
-          {isAdmin && <div style={{ fontSize: 11, color: '#d97706', fontWeight: 600, marginTop: 2 }}>👑 Administrateur</div>}
-        </div>
-        <div className="avatar" style={{ width: 48, height: 48, fontSize: 18, cursor: 'pointer' }} onClick={() => onNavigate('profile')}>
+    <div className="page home fade-in">
+      {/* En-tête */}
+      <div className="home-top">
+        <span className="home-brand">AMEEM</span>
+        <button className="avatar home-avatar" onClick={() => onNavigate('profile')} aria-label="Mon profil">
           {getInitials()}
-        </div>
+        </button>
       </div>
 
-      {/* Treasury card (admin/PCS only) */}
-      {(isAdmin || isPCS) && treasury && (
-        <div className="card card-gradient" style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 6 }}>💰 Solde de la Caisse</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>{treasury.balance.toLocaleString()} FCFA</div>
-          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Mis à jour le {formatDate(treasury.lastUpdated)}</div>
-          {isPCS && (
-            <button className="btn btn-sm" style={{ marginTop: 12, background: 'rgba(255,255,255,0.25)', color: 'white', width: 'auto' }} onClick={() => onNavigate('treasury')}>
-              Gérer la caisse →
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Payment status - for regular students/bureau */}
-      {!isAdmin && (
-        <div className="card" style={{ borderLeft: `4px solid ${paidThisMonth ? '#059669' : '#dc2626'}`, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-            {paidThisMonth ? '✅ Mensualité payée' : '⚠️ Mensualité en attente'}
+      {/* Carte principale */}
+      {isAdmin ? (
+        <div className="home-hero">
+          <div className="home-hero-label">Solde de la caisse</div>
+          <div className="home-hero-amount">
+            {treasury ? `${treasury.balance.toLocaleString('fr-FR')} FCFA` : '— FCFA'}
           </div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{currentMonth}</div>
-          {!paidThisMonth && (
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => onNavigate('payment')}>
-              Payer maintenant →
-            </button>
+          {treasury && <div className="home-hero-sub">Mis à jour le {formatDate(treasury.lastUpdated)}</div>}
+          <button className="home-hero-btn" onClick={() => onNavigate('treasury')}>Gérer la caisse</button>
+        </div>
+      ) : (
+        <div className="home-hero">
+          <div className="home-hero-title">Paiement mensuel du logement {monthLabel}</div>
+          {paidThisMonth ? (
+            <div className="home-hero-paid"><CircleCheck size={20} /> Paiement réglé, merci</div>
+          ) : (
+            <button className="home-hero-btn" onClick={() => onNavigate('payment')}>Payer</button>
           )}
         </div>
       )}
 
-      {/* Quick actions */}
-      <div style={{ marginBottom: 20 }}>
-        <div className="section-title">Actions rapides</div>
-        <div className="grid-2">
-          {!isAdmin && (
-            <>
-              <ActionBtn icon="💳" label="Payer mensualité" onClick={() => onNavigate('payment')} color="#1a56db" />
-              <ActionBtn icon="🚨" label="Urgence" onClick={() => onNavigate('emergency')} color="#dc2626" />
-              <ActionBtn icon="🪪" label="Ma carte" onClick={() => onNavigate('card')} color="#059669" />
-              <ActionBtn icon="👥" label="Bureau" onClick={() => onNavigate('bureau')} color="#7c3aed" />
-            </>
-          )}
-          {isAdmin && (
-            <>
-              <ActionBtn icon="🏛️" label="Bureau" onClick={() => onNavigate('admin')} color="#7c3aed" />
-              <ActionBtn icon="🎓" label="Étudiants" onClick={() => onNavigate('admin')} color="#1a56db" />
-              <ActionBtn icon="🚨" label="Urgences" onClick={() => onNavigate('emergency-list')} color="#dc2626" />
-              <ActionBtn icon="📊" label="Rapports" onClick={() => onNavigate('reports')} color="#059669" />
-            </>
-          )}
-        </div>
+      {/* Raccourcis */}
+      <div className="home-grid">
+        <Shortcut icon={<Megaphone size={22} />} title="Annonces" sub="Dernières infos" onClick={() => onNavigate('announcements')} />
+        <Shortcut icon={<MessageCircle size={22} />} title="Messages" sub={isBureau ? 'Messages reçus' : 'Écrire au bureau'} onClick={() => onNavigate('messages')} />
+        {isAdmin ? (
+          <>
+            <Shortcut icon={<Siren size={22} />} title="Urgences" sub="Alertes actives" danger onClick={() => onNavigate('emergency-list')} />
+            <Shortcut icon={<BarChart3 size={22} />} title="Rapports" sub="Bilans" onClick={() => onNavigate('reports')} />
+          </>
+        ) : (
+          <>
+            <Shortcut icon={<IdCard size={22} />} title="Carte de membre" sub="Ma carte" onClick={() => onNavigate('card')} />
+            <Shortcut icon={<Siren size={22} />} title="Urgence" sub="Alerter le bureau" danger onClick={() => onNavigate('emergency')} />
+          </>
+        )}
       </div>
 
-      {/* Active emergencies for admin/bureau */}
-      {(isAdmin || isBureau) && emergencies.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div className="section-title" style={{ color: '#dc2626' }}>🆘 Urgences actives</div>
-          {emergencies.map(e => (
-            <div key={e.id} className="card" style={{ borderLeft: '4px solid #dc2626', marginBottom: 8, cursor: 'pointer' }} onClick={() => onNavigate('emergency-list')}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>{e.userName}</div>
-              <div style={{ fontSize: 13, color: '#374151', margin: '4px 0' }}>{e.message}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af' }}>{formatDate(e.timestamp)}</div>
-            </div>
-          ))}
-        </div>
+      {/* Bouton large */}
+      {isAdmin ? (
+        <WideRow icon={<Users size={20} />} title="Administration" sub="Membres, bureau et paiements" onClick={() => onNavigate('admin')} />
+      ) : (
+        <WideRow icon={<Users size={20} />} title="Le Bureau" sub="L'équipe de l'amicale" onClick={() => onNavigate('bureau')} />
       )}
 
-      {/* Announcements */}
-      {announcements.length > 0 && (
-        <div>
-          <div className="section-title">📢 Informations</div>
-          {announcements.slice(0, 3).map(a => (
-            <div key={a.id} className="card" style={{ marginBottom: 10, cursor: 'pointer' }} onClick={() => onNavigate('announcements')}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <div className="avatar" style={{ width: 34, height: 34, fontSize: 12 }}>{a.authorName[0]}</div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{a.title}</div>
-                  <div style={{ fontSize: 11, color: '#6b7280' }}>{a.authorName} • {formatDate(a.timestamp)}</div>
-                </div>
-                {isBureau && a.visibleTo === 'bureau' && <span className="badge badge-primary" style={{ marginLeft: 'auto', fontSize: 10 }}>Bureau</span>}
-              </div>
-              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as any}>
-                {a.content}
-              </div>
-            </div>
+      {/* Gestion (rôles concernés seulement) */}
+      {!isAdmin && isPCS && (
+        <>
+          <div className="home-section">Gestion</div>
+          <WideRow
+            icon={<Landmark size={20} />}
+            title="Trésorerie"
+            sub={treasury ? `${treasury.balance.toLocaleString('fr-FR')} FCFA en caisse` : 'Gérer la caisse'}
+            onClick={() => onNavigate('treasury')}
+          />
+        </>
+      )}
+
+      {/* Urgences actives (bureau / admin) */}
+      {isBureau && emergencies.length > 0 && (
+        <>
+          <div className="home-section home-section-danger">Urgences actives</div>
+          {emergencies.map(e => (
+            <button key={e.id} className="home-alert" onClick={() => onNavigate('emergency-list')}>
+              <div className="home-alert-name">{e.userName}</div>
+              <div className="home-alert-msg">{e.message}</div>
+              <div className="home-alert-date">{formatDate(e.timestamp)}</div>
+            </button>
           ))}
-          <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 4 }} onClick={() => onNavigate('announcements')}>
-            Voir toutes les infos →
-          </button>
-        </div>
+        </>
+      )}
+
+      {/* Dernières annonces */}
+      {announcements.length > 0 && (
+        <>
+          <div className="home-section">Dernières annonces</div>
+          {announcements.slice(0, 2).map(a => (
+            <button key={a.id} className="home-news" onClick={() => onNavigate('announcements')}>
+              <div className="home-news-head">
+                <span className="home-news-title">{a.title}</span>
+                {isBureau && a.visibleTo === 'bureau' && <span className="badge badge-primary">Bureau</span>}
+              </div>
+              <div className="home-news-meta">{a.authorName} • {formatDate(a.timestamp)}</div>
+              <div className="home-news-text">{a.content}</div>
+            </button>
+          ))}
+        </>
       )}
     </div>
   );
 }
 
-function ActionBtn({ icon, label, onClick, color }: { icon: string; label: string; onClick: () => void; color: string }) {
+function Shortcut({ icon, title, sub, onClick, danger }: { icon: ReactNode; title: string; sub: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button onClick={onClick} style={{
-      background: 'white', border: `1px solid #e5e7eb`, borderRadius: 12, padding: 14,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-      cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'inherit',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
-    }}>
-      <span style={{ fontSize: 26 }}>{icon}</span>
-      <span style={{ fontSize: 11, fontWeight: 600, color, textAlign: 'center', lineHeight: 1.3 }}>{label}</span>
+    <button className="home-tile" onClick={onClick}>
+      <span className={`home-tile-icon ${danger ? 'danger' : ''}`}>{icon}</span>
+      <span className="home-tile-title">{title}</span>
+      <span className="home-tile-sub">{sub}</span>
+    </button>
+  );
+}
+
+function WideRow({ icon, title, sub, onClick }: { icon: ReactNode; title: string; sub: string; onClick: () => void }) {
+  return (
+    <button className="home-row" onClick={onClick}>
+      <span className="home-row-icon">{icon}</span>
+      <span className="home-row-text">
+        <span className="home-row-title">{title}</span>
+        <span className="home-row-sub">{sub}</span>
+      </span>
+      <ChevronRight size={20} />
     </button>
   );
 }

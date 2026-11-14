@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../services/firebase';
 import { doc, updateDoc, query, collection, where, getDocs } from 'firebase/firestore';
+import { Mail, Phone, GraduationCap, KeyRound, LogOut, Eye, EyeOff, ChevronRight, CircleCheck } from 'lucide-react';
 
 interface Props {
   onNavigate: (page: string) => void;
 }
 
-export default function ProfilePage({ onNavigate }: Props) {
+export default function ProfilePage(_props: Props) {
   const { currentUser, logout } = useAuth();
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [newPwd, setNewPwd] = useState('');
@@ -45,7 +46,7 @@ export default function ProfilePage({ onNavigate }: Props) {
       const stored = JSON.parse(localStorage.getItem('amicale_user') || '{}');
       stored.password = hashedPwd;
       localStorage.setItem('amicale_user', JSON.stringify(stored));
-      setPwdSuccess('Mot de passe modifié avec succès !');
+      setPwdSuccess('Mot de passe modifié avec succès');
       setNewPwd(''); setConfirmPwd('');
       setShowChangePwd(false);
     } catch (e: any) { setPwdError('Erreur: ' + e.message); }
@@ -53,138 +54,101 @@ export default function ProfilePage({ onNavigate }: Props) {
   };
 
   const roleLabel = () => {
-    if (currentUser?.role === 'admin') return '👑 Administrateur';
-    if (currentUser?.role === 'bureau_member') return `🏛️ ${currentUser.bureauRole || 'Membre du Bureau'}`;
-    return '🎓 Étudiant Mbourois';
+    if (currentUser?.role === 'admin') return 'Administrateur';
+    if (currentUser?.role === 'bureau_member') return currentUser.bureauRole || 'Membre du Bureau';
+    return 'Étudiant Mbourois';
   };
 
-  const roleColor = () => {
-    if (currentUser?.role === 'admin') return '#d97706';
-    if (currentUser?.role === 'bureau_member') return '#7c3aed';
-    return '#1a56db';
-  };
+  const studies = [currentUser?.level, currentUser?.major].filter(Boolean).join(' · ');
 
   return (
-    <div className="page fade-in">
-      {/* Profile hero */}
-      <div style={{ textAlign: 'center', padding: '16px 0 24px' }}>
-        <div style={{
-          width: 80, height: 80, borderRadius: '50%',
-          background: `linear-gradient(135deg, ${roleColor()}, #059669)`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 28, fontWeight: 800, color: 'white',
-          margin: '0 auto 14px', border: '3px solid #e8f0fe',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.12)'
-        }}>
-          {currentUser?.firstName?.[0]}{currentUser?.lastName?.[0]}
+    <div className="page home fade-in">
+      {/* Identité */}
+      <div className="profile-hero">
+        <div className="profile-avatar">
+          {(currentUser?.firstName?.[0] || '') + (currentUser?.lastName?.[0] || '')}
         </div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{currentUser?.firstName} {currentUser?.lastName}</div>
-        <div style={{ fontSize: 13, color: roleColor(), fontWeight: 600 }}>{roleLabel()}</div>
+        <div className="profile-name">{currentUser?.firstName} {currentUser?.lastName}</div>
+        <span className="profile-role">{roleLabel()}</span>
       </div>
 
-      {/* Info card */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>📋 Informations personnelles</div>
-        {currentUser?.email && <InfoRow label="Email" value={currentUser.email} />}
-        {currentUser?.phone && <InfoRow label="Téléphone" value={currentUser.phone} />}
-        {currentUser?.address && <InfoRow label="Adresse" value={currentUser.address} />}
-        {currentUser?.level && <InfoRow label="Niveau" value={currentUser.level} />}
-        {currentUser?.major && <InfoRow label="Filière" value={currentUser.major} />}
-        <InfoRow label="Membre depuis" value={currentUser?.createdAt ? new Date(currentUser.createdAt).toLocaleDateString('fr-FR') : '-'} />
+      {/* Informations essentielles */}
+      <div className="profile-card">
+        {currentUser?.phone && <Item icon={<Phone size={18} />} label="Téléphone" value={currentUser.phone} />}
+        {currentUser?.email && <Item icon={<Mail size={18} />} label="Email" value={currentUser.email} />}
+        {studies && <Item icon={<GraduationCap size={18} />} label="Études" value={studies} />}
       </div>
 
       {pwdSuccess && (
-        <div className="alert alert-success" style={{ marginBottom: 12 }}>
-          <span>✅</span> {pwdSuccess}
-        </div>
+        <div className="profile-success"><CircleCheck size={18} /> {pwdSuccess}</div>
       )}
 
-      {/* Security */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🔐 Sécurité</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-          Votre mot de passe est utilisé pour confirmer les paiements.
-        </div>
-        {!showChangePwd ? (
-          <button className="btn btn-ghost" onClick={() => { setShowChangePwd(true); setPwdSuccess(''); setPwdError(''); }}>
-            🔑 Changer le mot de passe
-          </button>
-        ) : (
-          <div className="fade-in">
-            {pwdError && <div className="alert alert-danger" style={{ marginBottom: 10 }}>{pwdError}</div>}
-            <div className="input-group">
-              <label className="input-label">Nouveau mot de passe</label>
-              <div style={{ position: 'relative' }}>
-                <input className="input" type={showNewPwd ? 'text' : 'password'} placeholder="Minimum 6 caractères" value={newPwd} onChange={e => setNewPwd(e.target.value)} style={{ paddingRight: 44 }} />
-                <button type="button" onClick={() => setShowNewPwd(!showNewPwd)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>{showNewPwd ? '🙈' : '👁️'}</button>
-              </div>
-            </div>
-            <div className="input-group">
-              <label className="input-label">Confirmer</label>
-              <div style={{ position: 'relative' }}>
-                <input className="input" type={showConfirmPwd ? 'text' : 'password'} placeholder="Répéter le mot de passe" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} style={{ paddingRight: 44 }} />
-                <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>{showConfirmPwd ? '🙈' : '👁️'}</button>
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={handleChangePassword} disabled={saving}>
-              {saving ? '⏳ Enregistrement...' : '✅ Enregistrer'}
-            </button>
-            <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={() => { setShowChangePwd(false); setPwdError(''); setNewPwd(''); setConfirmPwd(''); }}>
-              Annuler
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Quick actions for non-admin */}
-      {currentUser?.role !== 'admin' && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>⚡ Actions rapides</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button className="btn btn-ghost" onClick={() => onNavigate('payment')}>💳 Faire un paiement</button>
-            <button className="btn btn-ghost" onClick={() => onNavigate('card')}>🪪 Voir ma carte membre</button>
-            {currentUser?.role !== 'bureau_member' && (
-              <button className="btn btn-ghost" onClick={() => onNavigate('emergency')}>🚨 Signaler une urgence</button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Logout button - visible and clear */}
-      {!confirmLogout ? (
-        <button
-          className="btn"
-          onClick={() => setConfirmLogout(true)}
-          style={{ background: '#fff', border: '2px solid #dc2626', color: '#dc2626', fontWeight: 700 }}
-        >
-          🚪 Se déconnecter
+      {/* Mot de passe */}
+      {!showChangePwd ? (
+        <button className="home-row" onClick={() => { setShowChangePwd(true); setPwdSuccess(''); setPwdError(''); }}>
+          <span className="home-row-icon"><KeyRound size={20} /></span>
+          <span className="home-row-text">
+            <span className="home-row-title">Mot de passe</span>
+            <span className="home-row-sub">Modifier mon mot de passe</span>
+          </span>
+          <ChevronRight size={20} />
         </button>
       ) : (
-        <div className="card" style={{ border: '2px solid #dc2626', background: '#fff5f5' }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, textAlign: 'center' }}>
-            Confirmer la déconnexion ?
+        <div className="profile-card profile-form fade-in">
+          {pwdError && <div className="alert alert-danger" style={{ marginBottom: 10 }}>{pwdError}</div>}
+          <div className="input-group">
+            <label className="input-label">Nouveau mot de passe</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input" type={showNewPwd ? 'text' : 'password'} placeholder="Minimum 6 caractères" value={newPwd} onChange={e => setNewPwd(e.target.value)} style={{ paddingRight: 44 }} />
+              <button type="button" className="profile-eye" onClick={() => setShowNewPwd(!showNewPwd)} aria-label="Afficher le mot de passe">
+                {showNewPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-danger" style={{ flex: 1 }} onClick={logout}>
-              Oui, déconnecter
-            </button>
-            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setConfirmLogout(false)}>
-              ← Annuler
-            </button>
+          <div className="input-group">
+            <label className="input-label">Confirmer</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input" type={showConfirmPwd ? 'text' : 'password'} placeholder="Répéter le mot de passe" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} style={{ paddingRight: 44 }} />
+              <button type="button" className="profile-eye" onClick={() => setShowConfirmPwd(!showConfirmPwd)} aria-label="Afficher le mot de passe">
+                {showConfirmPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
+          <button className="btn btn-primary" onClick={handleChangePassword} disabled={saving}>
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </button>
+          <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={() => { setShowChangePwd(false); setPwdError(''); setNewPwd(''); setConfirmPwd(''); }}>
+            Annuler
+          </button>
         </div>
       )}
 
-      <div style={{ height: 16 }} />
+      {/* Déconnexion */}
+      {!confirmLogout ? (
+        <button className="profile-logout" onClick={() => setConfirmLogout(true)}>
+          <LogOut size={20} /> Se déconnecter
+        </button>
+      ) : (
+        <div className="profile-card profile-confirm">
+          <div className="profile-confirm-title">Se déconnecter ?</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-danger" style={{ flex: 1 }} onClick={logout}>Oui</button>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setConfirmLogout(false)}>Annuler</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function Item({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-      <span style={{ color: '#6b7280', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontWeight: 600, textAlign: 'right', maxWidth: '65%', wordBreak: 'break-word' }}>{value}</span>
+    <div className="profile-item">
+      <span className="home-row-icon">{icon}</span>
+      <span className="profile-item-text">
+        <span className="profile-item-label">{label}</span>
+        <span className="profile-item-value">{value}</span>
+      </span>
     </div>
   );
 }

@@ -15,6 +15,7 @@ import AnnouncementsPage from './pages/AnnouncementsPage';
 import MessagesPage from './pages/MessagesPage';
 import ProfilePage from './pages/ProfilePage';
 import ReportsPage from './pages/ReportsPage';
+import { House, Megaphone, MessageCircle, User, Users, Shield, Wallet, CreditCard } from 'lucide-react';
 import './index.css';
 
 type Page = 'home'|'payment'|'bureau'|'card'|'emergency'|'treasury'|'admin'|'announcements'|'messages'|'profile'|'admin-members'|'admin-payments'|'emergency-list'|'reports';
@@ -66,10 +67,12 @@ function AppContent() {
   const isBureau = currentUser.role==='bureau_member'||isAdmin;
 
   const navItems = isAdmin
-    ? [{k:'home',l:'Accueil',i:'🏠'},{k:'admin',l:'Admin',i:'🛡️'},{k:'treasury',l:'Caisse',i:'💰'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}]
+    ? [{k:'home',l:'Accueil'},{k:'admin',l:'Admin'},{k:'treasury',l:'Caisse'},{k:'announcements',l:'Annonces'},{k:'profile',l:'Profil'}]
     : isBureau
-    ? [{k:'home',l:'Accueil',i:'🏠'},{k:'announcements',l:'Infos',i:'📢'},{k:'bureau',l:'Bureau',i:'👥'},{k:'messages',l:'Messages',i:'💬'},{k:'profile',l:'Profil',i:'👤'}]
-    : [{k:'home',l:'Accueil',i:'🏠'},{k:'payment',l:'Payer',i:'💳'},{k:'bureau',l:'Bureau',i:'👥'},{k:'announcements',l:'Infos',i:'📢'},{k:'profile',l:'Profil',i:'👤'}];
+    ? [{k:'home',l:'Accueil'},{k:'announcements',l:'Annonces'},{k:'bureau',l:'Bureau'},{k:'messages',l:'Messages'},{k:'profile',l:'Profil'}]
+    : [{k:'home',l:'Accueil'},{k:'announcements',l:'Annonces'},{k:'messages',l:'Messages'},{k:'profile',l:'Profil'}];
+
+  const navIcons: Record<string, typeof House> = { home: House, announcements: Megaphone, messages: MessageCircle, profile: User, bureau: Users, admin: Shield, treasury: Wallet, payment: CreditCard };
 
   const titles: Record<string,string> = {home:'AMICALE MBOUROIS',payment:'Paiements',bureau:'Bureau Exécutif',card:'Ma Carte',emergency:'Urgences',treasury:'Caisse',admin:'Administration','admin-members':'Administration','admin-payments':'Administration',announcements:'Informations',messages:'Messages',profile:'Mon Profil',reports:'Rapports','emergency-list':'Urgences'};
 
@@ -99,29 +102,34 @@ function AppContent() {
   };
 
   return (
-    <div className="app-layout">
-      <div className="header">
-        <div className="header-logo">
-          <div style={{width:36,height:36,borderRadius:'50%',background:'rgba(255,255,255,0.2)',display:'flex',alignItems:'center',justifyContent:'center',border:'2px solid rgba(255,255,255,0.4)',overflow:'hidden'}}>
-            <img src="/icons/icon-128.png" alt="AMEEM" style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}} onError={(e)=>{(e.target as HTMLImageElement).src='/icons/logo.jpg';}} />
+       <div className={`app-layout ${['home','profile','payment','card'].includes(page)?'is-home':''}`}>
+      {page!=='home' && (
+        <div className="header">
+          <div className="header-logo">
+            <div style={{width:36,height:36,borderRadius:'50%',background:'rgba(255,255,255,0.2)',display:'flex',alignItems:'center',justifyContent:'center',border:'2px solid rgba(255,255,255,0.4)',overflow:'hidden'}}>
+              <img src="/icons/icon-128.png" alt="AMEEM" style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}} onError={(e)=>{(e.target as HTMLImageElement).src='/icons/logo.jpg';}} />
+            </div>
+            <div>
+              <div className="header-title">{titles[page]||'AMEEM'}</div>
+              <div className="header-subtitle">Amicale des Étudiants de Mbour</div>
+            </div>
           </div>
-          <div>
-            <div className="header-title">{titles[page]||'AMEEM'}</div>
-            <div className="header-subtitle">Amicale des Étudiants de Mbour</div>
-          </div>
+          <button onClick={()=>navigate('profile')} style={{background:'rgba(255,255,255,0.2)',border:'none',borderRadius:'50%',width:36,height:36,cursor:'pointer',fontSize:18}}>👤</button>
         </div>
-        <button onClick={()=>navigate('profile')} style={{background:'rgba(255,255,255,0.2)',border:'none',borderRadius:'50%',width:36,height:36,cursor:'pointer',fontSize:18}}>👤</button>
-      </div>
+      )}
 
       <div style={{flex:1,overflowY:'auto'}}>{renderPage()}</div>
 
       <nav className="bottom-nav">
-        {navItems.map(item=>(
-          <button key={item.k} className={`nav-item ${isNavActive(item.k)?'active':''}`} onClick={()=>navigate(item.k)}>
-            <span style={{fontSize:22}}>{item.i}</span>
-            <span className="nav-label">{item.l}</span>
-          </button>
-        ))}
+        {navItems.map(item=>{
+          const Icon = navIcons[item.k];
+          return (
+            <button key={item.k} className={`nav-item ${isNavActive(item.k)?'active':''}`} onClick={()=>navigate(item.k)}>
+              {Icon && <Icon size={24}/>}
+              <span className="nav-label">{item.l}</span>
+            </button>
+          );
+        })}
       </nav>
       <PWAInstallPrompt/>
     </div>

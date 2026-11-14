@@ -1,164 +1,238 @@
 import { useState, useEffect } from 'react';
 import { db } from '../services/firebase';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
+import { ChevronLeft, ChevronRight, Download, List } from 'lucide-react';
 
-interface Payment { id?: string; userId?: string; userName?: string; amount?: number; type?: string; timestamp?: string; month?: string; }
-interface Withdrawal { id?: string; amount?: number; reason?: string; timestamp?: string; performedBy?: string; }
+interface Payment { id?: string; userName?: string; amount?: number; type?: string; status?: string; timestamp: string; }
+interface Withdrawal { id?: string; amount?: number; reason?: string; performedBy?: string; timestamp: string; }
+
+// Convertit n'importe quel format de date Firestore en texte ISO
+const toIso = (v: any): string => {
+  if (typeof v === 'string') return v;
+  if (v && typeof v.toDate === 'function') return v.toDate().toISOString();
+  if (typeof v === 'number') return new Date(v).toISOString();
+  return '';
+};
+
+const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const fmt = (n: number) => n.toLocaleString('fr-FR');
+const typeLabel = (t?: string) =>
+  t === 'mensualite' ? 'Mensualités' : t === 'carte' ? 'Cartes de membre' : t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Autres';
+const formatDate = (iso: string) => {
+  if (!iso) return 'Date inconnue';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? 'Date inconnue' : d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
 
 export default function ReportsPage() {
+  const now = new Date();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<'monthly' | 'annual'>('monthly');
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [mode, setMode] = useState<'month' | 'year'>('month');
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
-      const pq = query(collection(db, 'payments'), orderBy('timestamp', 'desc'));
-      const ps = await getDocs(pq);
-      setPayments(ps.docs.map(d => ({ id: d.id, ...d.data() } as Payment)));
-
-      const wq = query(collection(db, 'withdrawals'), orderBy('timestamp', 'desc'));
-      const ws = await getDocs(wq);
-      setWithdrawals(ws.docs.map(d => ({ id: d.id, ...d.data() } as Withdrawal)));
+      const ps = await getDocs(collection(db, 'payments'));
+      setPayments(ps.docs.map(d => { const x: any = d.data(); return { id: d.id, ...x, timestamp: toIso(x.timestamp) } as Payment; }));
     } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    try {
+      const ws = await getDocs(collection(db, 'withdrawals'));
+      setWithdrawals(ws.docs.map(d => { const x: any = d.data(); return { id: d.id, ...x, timestamp: toIso(x.timestamp) } as Withdrawal; }));
+    } catch (e) { console.error(e); }
+    setLoading(false);
   };
 
-  const filterByPeriod = <T extends { timestamp?: string }>(items: T[]): T[] => {
-    if (period === 'annual') {
-      const year = selectedMonth.split('-')[0];
-      return items.filter(i => i.timestamp?.startsWith(year));
-    }
-    return items.filter(i => i.timestamp?.startsWith(selectedMonth));
+  // Période choisie
+  const prefix = mode === 'year' ? `${year}` : `${year}-${String(month + 1).padStart(2, '0')}`;
+  const label = mode === 'year' ? `${year}` : `${MONTHS[month]} ${year}`;
+  const isCurrent = mode === 'year' ? year >= now.getFullYear() : (year > now.getFullYear() || (year === now.getFullYear() && month >= now.getMonth()));
+
+  const goPrev = () => {
+    if (mode === 'year') setYear(year - 1);
+    else if (month === 0) { setMonth(11); setYear(year - 1); }
+    else setMonth(month - 1);
+  };
+  const goNext = () => {
+    if (isCurrent) return;
+    if (mode === 'year') setYear(year + 1);
+    else if (month === 11) { setMonth(0); setYear(year + 1); }
+    else setMonth(month + 1);
   };
 
-  const filteredPayments = filterByPeriod(payments);
-  const filteredWithdrawals = filterByPeriod(withdrawals);
-  const totalEntrees = filteredPayments.reduce((s, p) => s + (p.amount || 0), 0);
-  const totalSorties = filteredWithdrawals.reduce((s, w) => s + (w.amount || 0), 0);
+  // Seuls les paiements confirmés comptent (pas les « en attente » ni « rejetés »)
+  const counted = payments.filter(p => !p.status || p.status === 'completed');
+  const inPeriod = <T extends { timestamp: string }>(items: T[]) =>
+    items.filter(i => i.timestamp.startsWith(prefix))
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  const periodPayments = inPeriod(counted);
+  const periodWithdrawals = inPeriod(withdrawals);
+  const undated = counted.filter(p => !p.timestamp).length + withdrawals.filter(w => !w.timestamp).length;
+
+  const totalEntrees = periodPayments.reduce((s, p) => s + (p.amount || 0), 0);
+  const totalSorties = periodWithdrawals.reduce((s, w) => s + (w.amount || 0), 0);
   const solde = totalEntrees - totalSorties;
 
-  const formatDate = (iso?: string) => {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
+  // Entrées groupées par type
+  const byType: Record<string, { count: number; total: number }> = {};
+  periodPayments.forEach(p => {
+    const k = typeLabel(p.type);
+    byType[k] = byType[k] || { count: 0, total: 0 };
+    byType[k].count += 1;
+    byType[k].total += p.amount || 0;
+  });
+  const typeRows = Object.entries(byType);
 
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1 — Paiements
-    const payData = [
-      ['Date', 'Membre', 'Montant (FCFA)', 'Type'],
-      ...filteredPayments.map(p => [formatDate(p.timestamp), p.userName || '—', p.amount || 0, p.type || 'mensualité']),
+    const summary: (string | number)[][] = [
+      [`BILAN ${mode === 'year' ? 'ANNUEL' : 'MENSUEL'} — ${label}`],
       [],
-      ['TOTAL ENTRÉES', '', totalEntrees, ''],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(payData), 'Paiements');
-
-    // Sheet 2 — Retraits
-    const wdData = [
-      ['Date', 'Motif', 'Montant (FCFA)', 'Effectué par'],
-      ...filteredWithdrawals.map(w => [formatDate(w.timestamp), w.reason || '—', w.amount || 0, w.performedBy || '—']),
+      ['Total entrées (FCFA)', totalEntrees],
+      ['Total sorties (FCFA)', totalSorties],
+      ['Solde de la période (FCFA)', solde],
       [],
-      ['TOTAL SORTIES', '', totalSorties, ''],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wdData), 'Retraits');
-
-    // Sheet 3 — Résumé
-    const label = period === 'annual' ? selectedMonth.split('-')[0] : selectedMonth;
-    const sumData = [
-      [`BILAN ${period === 'annual' ? 'ANNUEL' : 'MENSUEL'} — ${label}`],
+      ['ENTRÉES PAR TYPE', 'Nombre', 'Total (FCFA)'],
+      ...typeRows.map(([k, v]) => [k, v.count, v.total]),
       [],
-      ['Total Entrées (FCFA)', totalEntrees],
-      ['Total Sorties (FCFA)', totalSorties],
-      ['Solde Net (FCFA)', solde],
+      ['DÉTAIL DES RETRAITS', '', '', ''],
+      ['Date', 'Motif', 'Responsable', 'Montant (FCFA)'],
+      ...[...periodWithdrawals].reverse().map(w => [formatDate(w.timestamp), w.reason || '—', w.performedBy || '—', w.amount || 0]),
+      ['TOTAL', '', '', totalSorties],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumData), 'Résumé');
+    const s1 = XLSX.utils.aoa_to_sheet(summary);
+    s1['!cols'] = [{ wch: 30 }, { wch: 28 }, { wch: 22 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, s1, 'Résumé');
 
-    XLSX.writeFile(wb, `Bilan_AMEEM_${label}.xlsx`);
+    const payRows = [
+      ['Date', 'Membre', 'Type', 'Montant (FCFA)'],
+      ...[...periodPayments].reverse().map(p => [formatDate(p.timestamp), p.userName || '—', typeLabel(p.type), p.amount || 0]),
+      [],
+      ['TOTAL', '', '', totalEntrees],
+    ];
+    const s2 = XLSX.utils.aoa_to_sheet(payRows);
+    s2['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, s2, 'Paiements');
+
+    const wdRows = [
+      ['Date', 'Motif', 'Responsable', 'Montant (FCFA)'],
+      ...[...periodWithdrawals].reverse().map(w => [formatDate(w.timestamp), w.reason || '—', w.performedBy || '—', w.amount || 0]),
+      [],
+      ['TOTAL', '', '', totalSorties],
+    ];
+    const s3 = XLSX.utils.aoa_to_sheet(wdRows);
+    s3['!cols'] = [{ wch: 16 }, { wch: 34 }, { wch: 22 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, s3, 'Retraits');
+
+    XLSX.writeFile(wb, `Bilan_AMEEM_${prefix}.xlsx`);
   };
 
-  const card = (label: string, value: string, color: string, icon: string) => (
-    <div style={{ background: 'white', borderRadius: 16, padding: '18px 16px', textAlign: 'center', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', border: `2px solid ${color}20` }}>
-      <div style={{ fontSize: 28, marginBottom: 6 }}>{icon}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>{label}</div>
+  if (loading) return (
+    <div className="page home" style={{ textAlign: 'center', paddingTop: 60 }}>
+      <div className="spinner" style={{ margin: '0 auto' }} />
     </div>
   );
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, fontSize: 16 }}>⏳ Chargement...</div>;
-
   return (
-    <div style={{ padding: '20px 16px', maxWidth: 600, margin: '0 auto' }}>
-      <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>📊 Rapports</h2>
-      <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 20 }}>Bilan financier de l'amicale</p>
+    <div className="page home fade-in">
+      {/* Mois / Année */}
+      <div className="rep-seg">
+        <button className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>Mois</button>
+        <button className={mode === 'year' ? 'active' : ''} onClick={() => setMode('year')}>Année</button>
+      </div>
 
-      {/* Période */}
-      <div style={{ background: 'white', borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {(['monthly', 'annual'] as const).map(p => (
-            <button key={p} onClick={() => setPeriod(p)} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 14,
-              background: period === p ? '#1a56db' : '#f3f4f6', color: period === p ? 'white' : '#374151'
-            }}>{p === 'monthly' ? '📅 Mensuel' : '📆 Annuel'}</button>
+      {/* Navigation de période */}
+      <div className="rep-nav">
+        <button onClick={goPrev} aria-label="Période précédente"><ChevronLeft size={22} /></button>
+        <span className="rep-nav-label">{label}</span>
+        <button onClick={goNext} disabled={isCurrent} aria-label="Période suivante"><ChevronRight size={22} /></button>
+      </div>
+
+      {/* Résumé */}
+      <div className="home-hero">
+        <div className="home-hero-label">Solde de la période</div>
+        <div className="home-hero-amount">{fmt(solde)} FCFA</div>
+        <div className="rep-hero-cols">
+          <div><span className="rep-hero-k">Entrées</span><span className="rep-hero-v">{fmt(totalEntrees)} F</span></div>
+          <div><span className="rep-hero-k">Sorties</span><span className="rep-hero-v">{fmt(totalSorties)} F</span></div>
+        </div>
+      </div>
+
+      <button className="home-row" onClick={exportExcel}>
+        <span className="home-row-icon"><Download size={20} /></span>
+        <span className="home-row-text">
+          <span className="home-row-title">Télécharger le bilan Excel</span>
+          <span className="home-row-sub">{label}</span>
+        </span>
+        <ChevronRight size={20} />
+      </button>
+
+      {undated > 0 && (
+        <div className="alert alert-warning">{undated} enregistrement{undated > 1 ? 's' : ''} sans date {undated > 1 ? 'ne sont' : "n'est"} pas compté{undated > 1 ? 's' : ''} dans les bilans.</div>
+      )}
+
+      {/* Entrées */}
+      <div className="home-section">Entrées</div>
+      {typeRows.length === 0 ? (
+        <div className="pay-empty">Aucune entrée sur cette période</div>
+      ) : (
+        <div className="profile-card">
+          {typeRows.map(([k, v]) => (
+            <div key={k} className="profile-item">
+              <span className="profile-item-text" style={{ flex: 1 }}>
+                <span className="profile-item-value">{k}</span>
+                <span className="profile-item-label">{v.count} paiement{v.count > 1 ? 's' : ''}</span>
+              </span>
+              <span className="pay-amount">+{fmt(v.total)} F</span>
+            </div>
           ))}
         </div>
-        <input type={period === 'monthly' ? 'month' : 'number'} value={period === 'monthly' ? selectedMonth : selectedMonth.split('-')[0]}
-          onChange={e => period === 'monthly' ? setSelectedMonth(e.target.value) : setSelectedMonth(e.target.value + '-01')}
-          style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 15 }} />
-      </div>
+      )}
 
-      {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
-        {card('Entrées', `${totalEntrees.toLocaleString()} F`, '#059669', '💰')}
-        {card('Sorties', `${totalSorties.toLocaleString()} F`, '#dc2626', '💸')}
-        {card('Solde', `${solde.toLocaleString()} F`, solde >= 0 ? '#1a56db' : '#dc2626', '📈')}
-      </div>
-
-      {/* Export */}
-      <button onClick={exportExcel} style={{
-        width: '100%', padding: '14px 0', borderRadius: 14, border: 'none', cursor: 'pointer',
-        background: 'linear-gradient(135deg, #059669, #1a56db)', color: 'white', fontWeight: 800, fontSize: 16, marginBottom: 20
-      }}>📥 Télécharger Excel</button>
-
-      {/* Paiements */}
-      <div style={{ background: 'white', borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-        <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12, color: '#059669' }}>💰 Paiements ({filteredPayments.length})</h3>
-        {filteredPayments.length === 0 ? (
-          <p style={{ color: '#9ca3af', textAlign: 'center', fontSize: 14 }}>Aucun paiement sur cette période</p>
-        ) : filteredPayments.slice(0, 10).map(p => (
-          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{p.userName || 'Membre'}</div>
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>{formatDate(p.timestamp)}</div>
+      {periodPayments.length > 0 && (
+        <button className="rep-toggle" onClick={() => setShowDetail(!showDetail)}>
+          <List size={16} /> {showDetail ? 'Masquer le détail' : `Voir le détail (${periodPayments.length})`}
+        </button>
+      )}
+      {showDetail && (
+        <div className="profile-card">
+          {periodPayments.map(p => (
+            <div key={p.id} className="profile-item">
+              <span className="profile-item-text" style={{ flex: 1 }}>
+                <span className="profile-item-value">{p.userName || 'Membre'}</span>
+                <span className="profile-item-label">{formatDate(p.timestamp)} · {typeLabel(p.type)}</span>
+              </span>
+              <span className="pay-amount">+{fmt(p.amount || 0)} F</span>
             </div>
-            <div style={{ fontWeight: 700, color: '#059669', fontSize: 15 }}>+{(p.amount || 0).toLocaleString()} F</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Retraits */}
-      <div style={{ background: 'white', borderRadius: 16, padding: 16, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-        <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12, color: '#dc2626' }}>💸 Retraits ({filteredWithdrawals.length})</h3>
-        {filteredWithdrawals.length === 0 ? (
-          <p style={{ color: '#9ca3af', textAlign: 'center', fontSize: 14 }}>Aucun retrait sur cette période</p>
-        ) : filteredWithdrawals.map(w => (
-          <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{w.reason || '—'}</div>
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>{formatDate(w.timestamp)}</div>
+      <div className="home-section">Retraits</div>
+      {periodWithdrawals.length === 0 ? (
+        <div className="pay-empty">Aucun retrait sur cette période</div>
+      ) : (
+        <div className="profile-card">
+          {periodWithdrawals.map(w => (
+            <div key={w.id} className="profile-item">
+              <span className="profile-item-text" style={{ flex: 1 }}>
+                <span className="profile-item-value">{w.reason || 'Sans motif'}</span>
+                <span className="profile-item-label">{formatDate(w.timestamp)}{w.performedBy ? ` · ${w.performedBy}` : ''}</span>
+              </span>
+              <span className="pay-amount rep-out">−{fmt(w.amount || 0)} F</span>
             </div>
-            <div style={{ fontWeight: 700, color: '#dc2626', fontSize: 15 }}>-{(w.amount || 0).toLocaleString()} F</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
